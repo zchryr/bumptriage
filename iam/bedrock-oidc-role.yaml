@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  IAM role that a bumptriage review workflow assumes via GitHub OIDC to invoke
+  Amazon Bedrock. Creates no long-lived credentials. Deploy once per update bot
+  so each gets its own role and blast radius.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: GitHub repository }
+        Parameters: [GitHubOwner, GitHubRepository, WorkflowFileName, DefaultBranch]
+      - Label: { default: Bedrock access }
+        Parameters: [BedrockModelArns]
+      - Label: { default: Account setup }
+        Parameters: [CreateOidcProvider, RoleName]
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: GitHub organisation or user that owns the repository.
+    AllowedPattern: "[A-Za-z0-9-]+"
+
+  GitHubRepository:
+    Type: String
+    Description: Repository name, without the owner.
+    AllowedPattern: "[A-Za-z0-9._-]+"
+
+  WorkflowFileName:
+    Type: String
+    Description: >-
+      Workflow file permitted to assume this role, for example
+      bumptriage-renovate-review.yml. This is what scopes the role to a single
+      update bot. Deploy a second stack with a different file name for the other
+      bot rather than widening this one.
+    Default: bumptriage-renovate-review.yml
+    AllowedPattern: "[A-Za-z0-9._-]+\\.ya?ml"
+
+  DefaultBranch:
+    Type: String
+    Description: >-
+      Branch the review workflow runs from. workflow_run always runs the default
+      branch's copy of a workflow, so this is not attacker-influenced.
+    Default: main
+
+  BedrockModelArns:
+    Type: CommaDelimitedList
+    Description: >-
+      Model or inference-profile ARNs this role may invoke. Prefer explicit ARNs
+      over a wildcard so the role cannot reach models you did not intend.
+    Default: "*"
+
+  CreateOidcProvider:
+    Type: String
+    Description: >-
+      Create the GitHub OIDC provider. An account may only have one, so choose No
+      if another stack already created it.
+    AllowedValues: ["Yes", "No"]
+    Default: "Yes"
+
+  RoleName:
+    Type: String
+    Description: Name for the created role.
+    Default: bumptriage-renovate-review
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOidcProvider, "Yes"]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS validates the provider's certificate chain against its own trust
+      # store for this issuer, so no thumbprint is pinned here.
+      Tags:
+        - { Key: ManagedBy, Value: bumptriage }
+
+  ReviewRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: !Sub "bumptriage review role for ${GitHubOwner}/${GitHubRepository}"
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateProvider
+                - !Ref GitHubOidcProvider
+                - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Scope to this repository. StringLike with a trailing wildcard
+                # tolerates the immutable subject-claim format that GitHub began
+                # applying to newly created repositories on 2026-07-15, which
+                # embeds numeric owner and repository ids:
+                #   repo:owner@123/repo@456:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}*/${GitHubRepository}*:*"
+                # Scope to one workflow file. This is the condition that keeps a
+                # Renovate role out of reach of the Dependabot workflow and of
+                # every other workflow in the repository. Deliberately NOT keyed
+                # on head_ref: a pull request author names their own branch.
+                token.actions.githubusercontent.com:workflow_ref: !Sub "${GitHubOwner}/${GitHubRepository}/.github/workflows/${WorkflowFileName}@refs/heads/${DefaultBranch}"
+      Policies:
+        - PolicyName: InvokeBedrock
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: !Ref BedrockModelArns
+      Tags:
+        - { Key: ManagedBy, Value: bumptriage }
+
+Outputs:
+  RoleArn:
+    Description: Set this as the BUMPTRIAGE_RENOVATE_ROLE_ARN repository variable.
+    Value: !GetAtt ReviewRole.Arn
+
+  TrustedWorkflowRef:
+    Description: The only workflow_ref permitted to assume this role.
+    Value: !Sub "${GitHubOwner}/${GitHubRepository}/.github/workflows/${WorkflowFileName}@refs/heads/${DefaultBranch}"

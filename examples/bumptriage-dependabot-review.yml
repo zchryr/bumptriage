@@ -1,0 +1,69 @@
+# Privileged half of the Dependabot review.
+#
+# This is a separate file from the Renovate review on purpose. The OIDC token
+# carries a `workflow_ref` claim naming the workflow file that requested it, so
+# one file per bot is what makes it possible to grant each bot its own IAM role
+# with its own blast radius. Pinning on the branch name is not an option: the
+# `sub` claim for a pull_request run contains no branch, and the `head_ref`
+# claim is chosen by whoever opened the pull request.
+#
+# Install as: .github/workflows/bumptriage-dependabot-review.yml
+
+name: bumptriage dependabot review
+
+on:
+  workflow_run:
+    workflows: ["bumptriage dependabot validate"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download validation transcripts
+        uses: actions/download-artifact@v8
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read pull request number
+        id: pr
+        run: |
+          number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
+          case "$number" in
+            ''|*[!0-9]*) echo "Refusing to continue: malformed pull request number." >&2; exit 1 ;;
+          esac
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch pull request commits
+        run: git fetch origin "pull/${{ steps.pr.outputs.number }}/head:bumptriage-head"
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.BUMPTRIAGE_DEPENDABOT_ROLE_ARN }}
+          aws-region: ${{ vars.BUMPTRIAGE_AWS_REGION }}
+          role-session-name: bumptriage-dependabot
+
+      - uses: zchryr/bumptriage@v1
+        with:
+          provider: bedrock
+          model: ${{ vars.BUMPTRIAGE_MODEL }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          bots: dependabot
+          trusted-authors: dependabot[bot]
+          validation-results: bumptriage-validation/validations.json

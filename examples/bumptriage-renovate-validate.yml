@@ -1,0 +1,49 @@
+# Untrusted half of the Renovate review. Runs the pull request's own build and
+# test commands, which means executing code from the dependency being updated.
+#
+# This job must never hold a secret. It has a read-only token, no `id-token`
+# permission, and produces nothing but evidence. The privileged half runs in
+# bumptriage-renovate-review.yml, triggered by workflow_run.
+#
+# Install as: .github/workflows/bumptriage-renovate-validate.yml
+
+name: bumptriage renovate validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bumptriage-renovate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: zchryr/bumptriage/validate@v1
+        with:
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          # One image for every command. A repository needing several toolchains
+          # should build a small image containing them and name it here.
+          image: node:24-bookworm-slim
+          commands: |
+            npm ci
+            npm test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation/
+          retention-days: 1

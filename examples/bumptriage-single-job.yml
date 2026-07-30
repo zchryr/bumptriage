@@ -1,0 +1,56 @@
+# Single-job setup. Simpler, and strictly weaker than the two-workflow split.
+#
+# Here one job holds the credentials AND runs the dependency update's code, so
+# the sandbox container is the only thing between the two. That is a real
+# boundary — validation runs in its own PID namespace as an unprivileged user
+# with a read-only root filesystem — but it is one boundary rather than two.
+#
+# Use this only when all of the following hold:
+#   - Renovate only. Dependabot runs cannot reach secrets or OIDC at all, so
+#     this topology simply does not work for them.
+#   - The runner is ephemeral and disposable.
+#   - The Docker socket is reachable, since the action spawns sibling containers.
+#
+# Otherwise prefer bumptriage-renovate-validate.yml plus bumptriage-renovate-review.yml.
+#
+# Install as: .github/workflows/bumptriage.yml
+
+name: bumptriage
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    if: startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.BUMPTRIAGE_RENOVATE_ROLE_ARN }}
+          aws-region: ${{ vars.BUMPTRIAGE_AWS_REGION }}
+          role-session-name: bumptriage
+
+      - uses: zchryr/bumptriage@v1
+        with:
+          provider: bedrock
+          model: ${{ vars.BUMPTRIAGE_MODEL }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          bots: renovate
+          trusted-authors: renovate[bot]
+          validation-commands: |
+            npm ci
+            npm test

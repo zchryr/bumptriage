@@ -1,0 +1,75 @@
+# Privileged half of the Renovate review.
+#
+# workflow_run runs this from the default branch with the base repository's
+# permissions, so it can hold credentials and write a comment. It downloads the
+# validation transcripts as data and never executes pull request code. The agent
+# reads repository files, which is safe — reading is not running.
+#
+# This file must exist on the default branch for the trigger to fire at all.
+#
+# Install as: .github/workflows/bumptriage-renovate-review.yml
+
+name: bumptriage renovate review
+
+on:
+  workflow_run:
+    workflows: ["bumptriage renovate validate"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download validation transcripts
+        uses: actions/download-artifact@v8
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation
+          # Downloading from a different workflow run needs run-id plus a token.
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read pull request number
+        id: pr
+        run: |
+          number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
+          case "$number" in
+            ''|*[!0-9]*) echo "Refusing to continue: malformed pull request number." >&2; exit 1 ;;
+          esac
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      # The pull request head is checked out as inert data for the agent to read
+      # with Read, Glob, and Grep. Nothing in this job builds, installs, or runs
+      # it — that already happened in the unprivileged job.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch pull request commits
+        run: git fetch origin "pull/${{ steps.pr.outputs.number }}/head:bumptriage-head"
+
+      # Exchanges the workflow's OIDC identity for short-lived Bedrock
+      # credentials. No AWS keys are stored in this repository.
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.BUMPTRIAGE_RENOVATE_ROLE_ARN }}
+          aws-region: ${{ vars.BUMPTRIAGE_AWS_REGION }}
+          role-session-name: bumptriage-renovate
+
+      - uses: zchryr/bumptriage@v1
+        with:
+          provider: bedrock
+          model: ${{ vars.BUMPTRIAGE_MODEL }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          bots: renovate
+          trusted-authors: renovate[bot]
+          validation-results: bumptriage-validation/validations.json

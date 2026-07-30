@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+node_modules
+coverage
+examples
+iam
+scripts
+*.md
+!README.md
+.env
+.env.*
+*.log
+src/*.test.mjs

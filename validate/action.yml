@@ -1,0 +1,74 @@
+name: bumptriage validate
+description: Run dependency-update validation commands in a sandbox and record transcripts for review
+
+# This runs in the untrusted half of the two-workflow setup. It executes code
+# from the pull request, so the job invoking it must hold no secrets and have a
+# read-only token. It produces evidence; it never reaches a conclusion.
+
+inputs:
+  commands:
+    description: Newline-separated commands to run in the sandbox.
+    required: false
+  image:
+    description: Container image the commands run in.
+    required: false
+    default: node:24-bookworm-slim
+  network:
+    description: 'Sandbox network policy: bridge or none. Installing dependencies requires bridge.'
+    required: false
+    default: bridge
+  head-sha:
+    description: Commit to snapshot and validate.
+    required: true
+  pr-number:
+    description: Pull request number, recorded for the review job.
+    required: true
+  output-directory:
+    description: Directory the transcripts are written to.
+    required: false
+    default: bumptriage-validation
+  memory:
+    description: Memory limit per validation container.
+    required: false
+    default: 2g
+  cpus:
+    description: CPU limit per validation container.
+    required: false
+    default: "2"
+  pids-limit:
+    description: Process limit per validation container.
+    required: false
+    default: "512"
+  timeout-seconds:
+    description: Timeout for a single command.
+    required: false
+    default: "600"
+  total-timeout-seconds:
+    description: Combined timeout across all commands.
+    required: false
+    default: "1800"
+
+outputs:
+  directory:
+    description: Directory containing validations.json and pull-request.json.
+    value: ${{ inputs.output-directory }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run validation commands
+      shell: bash
+      env:
+        BUMPTRIAGE_VALIDATE_COMMANDS: ${{ inputs.commands }}
+        BUMPTRIAGE_VALIDATE_IMAGE: ${{ inputs.image }}
+        BUMPTRIAGE_VALIDATE_NETWORK: ${{ inputs.network }}
+        BUMPTRIAGE_VALIDATE_HEAD_SHA: ${{ inputs.head-sha }}
+        BUMPTRIAGE_VALIDATE_PR_NUMBER: ${{ inputs.pr-number }}
+        BUMPTRIAGE_VALIDATE_OUTPUT_DIR: ${{ inputs.output-directory }}
+        BUMPTRIAGE_VALIDATE_MEMORY: ${{ inputs.memory }}
+        BUMPTRIAGE_VALIDATE_CPUS: ${{ inputs.cpus }}
+        BUMPTRIAGE_VALIDATE_PIDS_LIMIT: ${{ inputs.pids-limit }}
+        BUMPTRIAGE_VALIDATE_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        BUMPTRIAGE_VALIDATE_TOTAL_TIMEOUT_SECONDS: ${{ inputs.total-timeout-seconds }}
+        BUMPTRIAGE_VALIDATE_REPOSITORY_PATH: ${{ github.workspace }}
+      run: node "${{ github.action_path }}/run.mjs"

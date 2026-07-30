@@ -1,0 +1,47 @@
+# Untrusted half of the Dependabot review.
+#
+# Dependabot-triggered pull_request runs are restricted by GitHub: the token is
+# read-only and organisation or repository Actions secrets are not available.
+# That is exactly what this job wants — it holds nothing worth stealing while it
+# runs the updated dependency's code.
+#
+# Install as: .github/workflows/bumptriage-dependabot-validate.yml
+
+name: bumptriage dependabot validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bumptriage-dependabot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: zchryr/bumptriage/validate@v1
+        with:
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          image: node:24-bookworm-slim
+          commands: |
+            npm ci
+            npm test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation/
+          retention-days: 1

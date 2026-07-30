@@ -1,0 +1,161 @@
+name: bumptriage
+description: Agentic review of Renovate and Dependabot dependency-update pull requests
+author: bumptriage contributors
+
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  provider:
+    description: 'Model provider: anthropic, fireworks, or bedrock.'
+    required: false
+    default: anthropic
+  model:
+    description: Model identifier your provider expects. For Bedrock, a model id or inference-profile ARN.
+    required: true
+  api-key:
+    description: API key for the anthropic provider. Not used by bedrock, which reads AWS credentials from the environment.
+    required: false
+  base-url:
+    description: >-
+      Endpoint URL, without the /v1 suffix. Required for anthropic (use
+      https://api.anthropic.com for the hosted API). Defaulted for fireworks,
+      and not required for bedrock, where AWS derives the endpoint from the
+      region. See examples/providers.md.
+    required: false
+  model-overrides:
+    description: Optional JSON object mapping model names to provider-specific ids, such as Bedrock inference-profile ARNs.
+    required: false
+
+  forge:
+    description: 'Forge hosting the repository: github or gitea.'
+    required: false
+    default: github
+  token:
+    description: Token used to read pull request metadata and upsert the review comment.
+    required: true
+  repository:
+    description: Repository in owner/name form.
+    required: true
+  pr-number:
+    description: Pull request number to review.
+    required: true
+  server-url:
+    description: Forge web URL. Defaults to the workflow's server URL.
+    required: false
+    default: ${{ github.server_url }}
+  api-url:
+    description: Forge API URL. Defaults to the workflow's API URL. On GitHub this is distinct from server-url.
+    required: false
+    default: ${{ github.api_url }}
+
+  trusted-authors:
+    description: Comma-separated account names permitted to trigger a review, for example "renovate[bot]". Required, with no default.
+    required: true
+  trusted-author-ids:
+    description: Optional comma-separated numeric account ids. When set, the author's id must match, pinning trust to an account rather than a name.
+    required: false
+  bots:
+    description: Comma-separated update bots to accept - renovate, dependabot, or both.
+    required: false
+    default: renovate,dependabot
+  branch-prefixes:
+    description: Optional comma-separated branch prefixes replacing the bots' defaults, for a reconfigured branchPrefix.
+    required: false
+  allow-forks:
+    description: Review pull requests originating from forks. Off by default.
+    required: false
+    default: "false"
+
+  validation-commands:
+    description: Newline-separated commands to run in the sandbox before the review. Mutually exclusive with validation-results.
+    required: false
+  validation-results:
+    description: Path to a JSON array of validation transcripts produced by an earlier unprivileged job. Mutually exclusive with validation-commands.
+    required: false
+  validation-image:
+    description: Container image validation commands run in.
+    required: false
+    default: node:24-bookworm-slim
+  validation-network:
+    description: 'Sandbox network policy: bridge or none. Installing dependencies requires bridge.'
+    required: false
+    default: bridge
+  validation-timeout-seconds:
+    description: Timeout for a single validation command.
+    required: false
+    default: "600"
+  validation-total-timeout-seconds:
+    description: Combined timeout across all validation commands.
+    required: false
+    default: "1800"
+  validation-memory:
+    description: Memory limit for each validation container.
+    required: false
+    default: 2g
+  validation-cpus:
+    description: CPU limit for each validation container.
+    required: false
+    default: "2"
+  validation-pids-limit:
+    description: Process limit for each validation container.
+    required: false
+    default: "512"
+
+  post-comment:
+    description: Upsert the review as a pull request comment.
+    required: false
+    default: "true"
+  max-turns:
+    description: Maximum agent turns.
+    required: false
+    default: "40"
+
+outputs:
+  report-path:
+    description: Path to the generated Markdown report.
+  recommendation:
+    description: merge, hold, reject, or unknown. Advisory only.
+  update-bot:
+    description: Which update bot the pull request was attributed to.
+
+runs:
+  using: docker
+  # On the default branch this builds from source, so forks and contributors run
+  # their own code. Release automation rewrites it to a pinned digest
+  # (docker://ghcr.io/zchryr/bumptriage@sha256:…) so consumers of a release tag pull
+  # one immutable, attested image instead of rebuilding it every job.
+  # See scripts/pin-image.mjs and CONTRIBUTING.md.
+  image: Dockerfile
+  # Inputs travel as environment variables, never as `args`. Process arguments
+  # are world-readable via /proc/<pid>/cmdline, so anything passed there could be
+  # recovered by a child process — including a dependency's install script.
+  env:
+    BUMPTRIAGE_PROVIDER: ${{ inputs.provider }}
+    BUMPTRIAGE_MODEL: ${{ inputs.model }}
+    BUMPTRIAGE_API_KEY: ${{ inputs.api-key }}
+    BUMPTRIAGE_BASE_URL: ${{ inputs.base-url }}
+    BUMPTRIAGE_MODEL_OVERRIDES: ${{ inputs.model-overrides }}
+    BUMPTRIAGE_FORGE: ${{ inputs.forge }}
+    BUMPTRIAGE_TOKEN: ${{ inputs.token }}
+    BUMPTRIAGE_REPOSITORY: ${{ inputs.repository }}
+    BUMPTRIAGE_PR_NUMBER: ${{ inputs.pr-number }}
+    BUMPTRIAGE_SERVER_URL: ${{ inputs.server-url }}
+    BUMPTRIAGE_API_URL: ${{ inputs.api-url }}
+    BUMPTRIAGE_TRUSTED_AUTHORS: ${{ inputs.trusted-authors }}
+    BUMPTRIAGE_TRUSTED_AUTHOR_IDS: ${{ inputs.trusted-author-ids }}
+    BUMPTRIAGE_BOTS: ${{ inputs.bots }}
+    BUMPTRIAGE_BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
+    BUMPTRIAGE_ALLOW_FORKS: ${{ inputs.allow-forks }}
+    BUMPTRIAGE_VALIDATION_COMMANDS: ${{ inputs.validation-commands }}
+    BUMPTRIAGE_VALIDATION_RESULTS: ${{ inputs.validation-results }}
+    BUMPTRIAGE_VALIDATION_IMAGE: ${{ inputs.validation-image }}
+    BUMPTRIAGE_VALIDATION_NETWORK: ${{ inputs.validation-network }}
+    BUMPTRIAGE_VALIDATION_TIMEOUT_SECONDS: ${{ inputs.validation-timeout-seconds }}
+    BUMPTRIAGE_VALIDATION_TOTAL_TIMEOUT_SECONDS: ${{ inputs.validation-total-timeout-seconds }}
+    BUMPTRIAGE_VALIDATION_MEMORY: ${{ inputs.validation-memory }}
+    BUMPTRIAGE_VALIDATION_CPUS: ${{ inputs.validation-cpus }}
+    BUMPTRIAGE_VALIDATION_PIDS_LIMIT: ${{ inputs.validation-pids-limit }}
+    BUMPTRIAGE_POST_COMMENT: ${{ inputs.post-comment }}
+    BUMPTRIAGE_MAX_TURNS: ${{ inputs.max-turns }}
