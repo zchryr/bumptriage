@@ -8,16 +8,26 @@ Last updated: 2026-07-30 · Target: v0.1.0 · Not yet released
 
 ## Honest summary
 
-All of the code is written and unit-tested. **None of it has reviewed a real
-pull request.** The end-to-end path — forge API, agent run, comment upsert — has
-never executed against live services. Treat v0.1 as unproven until the
-end-to-end rows below are green.
+**The end-to-end path works.** On 2026-07-30 bumptriage reviewed a real
+Dependabot pull request — [zchryr/bumptriage#3][pr3], its own
+`@anthropic-ai/claude-agent-sdk` 0.3.195 → 0.3.220 bump — and posted a verdict
+comment. Validation ran in the sandbox, the transcripts crossed the
+`workflow_run` boundary as an artifact, the agent read the repository, and the
+comment was upserted. Run [30584609805][run], `claude-haiku-4-5-20251001` over
+the `anthropic` provider.
 
-The repository now dogfoods itself:
+[pr3]: https://github.com/zchryr/bumptriage/pull/3
+[run]: https://github.com/zchryr/bumptriage/actions/runs/30584609805
+
+The repository dogfoods itself:
 `.github/workflows/bumptriage-dependabot-{validate,review}.yml` run the
 two-workflow topology against this repository's own Dependabot pull requests,
-using the working tree (`uses: ./`) rather than a release tag. Wired, not yet
-observed to produce a comment.
+using the working tree (`uses: ./`) rather than a release tag.
+
+Still unproven: Renovate (no Renovate installation here), Gitea, Fireworks,
+Bedrock, the release and attestation workflow, and the comment *update* path —
+only the create path has run. Treat those rows, not the project as a whole, as
+the remaining risk.
 
 ## Evidence levels
 
@@ -33,22 +43,22 @@ observed to produce a comment.
 | Area | State | Evidence |
 |---|---|---|
 | Input reading (`inputs.mjs`) | ✅ verified | Unit tests; error path observed in the built image |
-| Authorization gate (`auth.mjs`) | 🟡 unit only | 13 tests: case-insensitivity, forks, bot-account type, id allowlist |
-| Bot profiles (`botprofiles.mjs`) | 🟡 unit only | Covered through the gate's tests |
+| Authorization gate (`auth.mjs`) | ✅ verified | 13 tests, plus admitted a real `dependabot[bot]` PR in run 30584609805 |
+| Bot profiles (`botprofiles.mjs`) | ✅ verified | The `dependabot/` prefix matched a real head branch in the same run |
 | Sandbox flags (`buildDockerRunArgs`) | ✅ verified | Unit tests incl. negative assertions on `--privileged` and the Docker socket |
 | Sandbox execution | ✅ verified | Ran against a real repository and daemon; see Isolation below |
-| Provider — anthropic | 🟡 unit only | Env allowlist asserted; never called a live endpoint |
+| Provider — anthropic | ✅ verified | Live call to `api.anthropic.com` with `claude-haiku-4-5-20251001`, run 30584609805 |
 | Provider — fireworks | ⚪ untested | Endpoint documented as Anthropic-compatible; never called |
 | Provider — bedrock | ⚪ untested | Env shape asserted; no live Bedrock call |
-| Forge — GitHub | ⚪ untested | No live API call at all |
+| Forge — GitHub | ✅ verified | Read PR #3 and posted a comment, run 30584609805 |
 | Forge — Gitea | ⚪ untested | No live API call at all |
-| Comment upsert | 🟡 unit only | Pagination proven against a faked forge |
-| Evidence assembly / truncation | 🟡 unit only | Budget behaviour tested |
-| Verdict parsing | 🟡 unit only | Several report shapes tested |
-| Agent invocation | ⚪ untested | `query()` has never been called by this code |
-| Action image | ✅ verified | Builds; fails closed with no configuration; tools present |
-| Two-workflow topology | ⚪ untested | Never run on a runner |
-| `validate/` composite action | ⚪ untested | Never run on a runner |
+| Comment upsert | 🟡 unit only | Create path ran for real; the *update* path and >1 page of comments are still unproven |
+| Evidence assembly / truncation | 🟡 unit only | Real transcripts reached the model and were quoted back; the truncation budget was never approached |
+| Verdict parsing | 🟡 unit only | Several report shapes tested; the `recommendation` output value was not inspected on the live run |
+| Agent invocation | ✅ verified | `query()` ran to completion and produced a report, run 30584609805 |
+| Action image | ✅ verified | Builds; fails closed with no configuration; built on a runner from `image: Dockerfile` |
+| Two-workflow topology | ✅ verified | `pull_request` → artifact → `workflow_run` → comment, end to end on GitHub |
+| `validate/` composite action | ✅ verified | Ran `npm ci` and `npm test` in the sandbox and produced consumable transcripts |
 | CloudFormation templates | ❌ blocked | `bedrock-oidc-role.yaml` conditions on `workflow_ref`, which is not an AWS condition key — see [OIDC.md](OIDC.md) |
 | Release / attestation workflow | ⚪ untested | Never run |
 
@@ -86,12 +96,18 @@ Things that could still invalidate a design decision.
 | Question | Impact if wrong | Resolution |
 |---|---|---|
 | Does `runs.image` accept a digest reference? | Release pinning falls back to a mutable tag | First release proves it |
-| Is `/var/run/docker.sock` present inside a container action? | Single-job topology unusable; two-workflow unaffected | Minimal action running `docker ps` |
 | Can Dependabot runs mint an OIDC token? | Nothing — the two-workflow split makes it moot | Canary on a real Dependabot PR |
 | Does `runs.env` work on Gitea's act_runner? | Gitea users get missing-variable errors, which fail loudly | Run on a Gitea instance |
 | Does Fireworks tolerate the `cache_control` the runtime sends? | Degraded caching, or hard failure | Live call against Fireworks |
 | Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
+
+**Resolved 2026-07-30.** `/var/run/docker.sock` *is* mounted into a container
+action on a GitHub-hosted runner — it appears in the `docker run` invocation the
+runner logged for run 30584609805, without the action requesting it. The
+single-job topology is therefore viable on GitHub. Note this is the runner
+mounting the socket into the *action*, which is what lets it start sibling
+validation containers; validation containers themselves still never receive it.
 
 ## Roadmap
 
@@ -106,7 +122,8 @@ Things that could still invalidate a design decision.
 - [x] Unit tests, CodeQL, Dependabot
 - [x] Release automation with provenance and SBOM attestation
 - [ ] **End-to-end run against a real Renovate pull request**
-- [ ] **End-to-end run against a real Dependabot pull request**
+- [x] **End-to-end run against a real Dependabot pull request** — #3, run
+      30584609805, 2026-07-30
 - [ ] Resolve the open questions above
 - [ ] **Rewrite the Bedrock IAM role around `job_workflow_ref`** — see [OIDC.md](OIDC.md); the current template cannot be assumed
 - [ ] Ship the review job as a reusable workflow, which the IAM rewrite requires
