@@ -1,0 +1,50 @@
+# Untrusted half of bumptriage reviewing its own Dependabot pull requests.
+#
+# Dependabot-triggered pull_request runs are restricted by GitHub: the token is
+# read-only and Actions secrets are unavailable. That is exactly what this job
+# wants — it executes the updated dependency's code and holds nothing worth
+# stealing. It produces evidence; it never reaches a conclusion.
+#
+# This is the dogfooding copy. Consumers install the version in examples/, which
+# refers to a release tag instead of the working tree.
+
+name: bumptriage dependabot validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bumptriage-dependabot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The composite action comes from the checkout rather than a release tag,
+      # so a change to validate/ is exercised by the pull request that makes it.
+      - uses: ./validate
+        with:
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          image: node:24-bookworm-slim
+          commands: |
+            npm ci
+            npm test
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation/
+          retention-days: 1

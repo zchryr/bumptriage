@@ -1,0 +1,70 @@
+# Privileged half of bumptriage reviewing its own Dependabot pull requests.
+#
+# Runs on workflow_run, so it never executes pull request code. It downloads the
+# transcripts the untrusted job produced, reads the repository, and posts one
+# comment. The credentials live here; the execution happened over there.
+#
+# This is the dogfooding copy. Consumers install the version in examples/, which
+# refers to a release tag instead of the working tree.
+
+name: bumptriage dependabot review
+
+on:
+  workflow_run:
+    workflows: ["bumptriage dependabot validate"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Reading artifacts belonging to a different workflow run needs this. Without
+  # it the download below fails with a 403.
+  actions: read
+
+jobs:
+  review:
+    if: github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout runs first on purpose: it cleans the workspace, so downloading
+      # the transcripts before this point would delete them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download validation transcripts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # The pull request number comes from the untrusted job, so it is checked
+      # rather than trusted.
+      - name: Read pull request number
+        id: pr
+        run: |
+          number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
+          case "$number" in
+            ''|*[!0-9]*) echo "Refusing to continue: malformed pull request number." >&2; exit 1 ;;
+          esac
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      # Unauthenticated, which works because this repository is public.
+      - name: Fetch pull request commits
+        run: git fetch origin "pull/${{ steps.pr.outputs.number }}/head:bumptriage-head"
+
+      - uses: ./
+        with:
+          provider: anthropic
+          base-url: https://api.anthropic.com
+          model: ${{ vars.BUMPTRIAGE_MODEL }}
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.pr.outputs.number }}
+          bots: dependabot
+          trusted-authors: dependabot[bot]
+          validation-results: bumptriage-validation/validations.json

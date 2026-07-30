@@ -13,6 +13,12 @@ pull request.** The end-to-end path — forge API, agent run, comment upsert —
 never executed against live services. Treat v0.1 as unproven until the
 end-to-end rows below are green.
 
+The repository now dogfoods itself:
+`.github/workflows/bumptriage-dependabot-{validate,review}.yml` run the
+two-workflow topology against this repository's own Dependabot pull requests,
+using the working tree (`uses: ./`) rather than a release tag. Wired, not yet
+observed to produce a comment.
+
 ## Evidence levels
 
 | Level | Meaning |
@@ -71,6 +77,7 @@ Shipped and wrong, as opposed to merely unproven.
 | Defect | Effect | Fix |
 |---|---|---|
 | `iam/bedrock-oidc-role.yaml` conditions on `token.actions.githubusercontent.com:workflow_ref` | Not an AWS condition key, so the condition never matches and the role can never be assumed. Fails closed — unusable, not insecure. | Rewrite around `job_workflow_ref` + `repository_owner_id`; see [OIDC.md](OIDC.md) |
+| `examples/bumptriage-{dependabot,renovate}-review.yml` download the transcripts *before* `actions/checkout` | Checkout cleans a non-empty workspace, so the review job very likely starts with the transcripts deleted. Reasoned from checkout's documented behaviour, not yet observed. | Reorder so checkout runs first, as the dogfooding workflows in `.github/workflows/` do |
 
 ## Open questions
 
