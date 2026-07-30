@@ -117,7 +117,14 @@ Things that could still invalidate a design decision.
 | Does Fireworks tolerate the `cache_control` the runtime sends? | Degraded caching, or hard failure | Live call against Fireworks |
 | Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
-| Is `permissionMode: "dontAsk"` (`action.mjs:149`) a value the agent SDK recognises? | If not, the agent may run under the SDK's default permission mode rather than the intended one. Bounded by `tools`, which is what actually decides the tool set. | Raised by the review on #5, citing an SDK v0.3.214 change that rejects unrecognised modes. Check the SDK's `PermissionMode` type |
+
+**Resolved 2026-07-30.** `permissionMode: "dontAsk"` (`action.mjs:149`) is a
+value the agent SDK recognises. In 0.3.220 the type is
+`'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'`,
+so the v0.3.214 change rejecting unrecognised modes does not affect it. Checked
+by installing 0.3.220 and reading `sdk.d.ts:2092`. Raised by the review on #5,
+which flagged the SDK change without claiming `dontAsk` was invalid — the
+hedging was correct.
 
 **Resolved 2026-07-30.** `/var/run/docker.sock` *is* mounted into a container
 action on a GitHub-hosted runner — it appears in the `docker run` invocation the
