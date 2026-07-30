@@ -8,29 +8,40 @@ Last updated: 2026-07-30 · Target: v0.1.0 · Not yet released
 
 ## Honest summary
 
-**The end-to-end path works.** On 2026-07-30 bumptriage reviewed a real
-Dependabot pull request — [zchryr/bumptriage#3][pr3], its own
+**The end-to-end path works, for both bots.** On 2026-07-30 bumptriage reviewed
+a real Dependabot pull request ([#3][pr3], run [30584609805][run3]) and a real
+Renovate one ([#5][pr5], run [30587101886][run5]) — both its own
 `@anthropic-ai/claude-agent-sdk` 0.3.195 → 0.3.220 bump — and posted a verdict
-comment. Validation ran in the sandbox, the transcripts crossed the
+comment on each. Validation ran in the sandbox, the transcripts crossed the
 `workflow_run` boundary as an artifact, the agent read the repository, and the
-comment was upserted. Run [30584609805][run], `claude-haiku-4-5-20251001` over
-the `anthropic` provider.
+comment was created. `claude-haiku-4-5-20251001` over the `anthropic` provider.
 
 [pr3]: https://github.com/zchryr/bumptriage/pull/3
-[run]: https://github.com/zchryr/bumptriage/actions/runs/30584609805
+[run3]: https://github.com/zchryr/bumptriage/actions/runs/30584609805
+[pr5]: https://github.com/zchryr/bumptriage/pull/5
+[run5]: https://github.com/zchryr/bumptriage/actions/runs/30587101886
 
 The repository dogfoods itself:
 `.github/workflows/bumptriage-{dependabot,renovate}-{validate,review}.yml` run
 the two-workflow topology against this repository's own bot pull requests, using
 the working tree (`uses: ./`) rather than a release tag. Renovate manages npm
 and Dependabot manages github-actions and docker, so the two never open a
-duplicate pull request and both bot profiles get exercised. The Renovate half is
-wired but has not yet produced a comment.
+duplicate pull request and both bot profiles get exercised. Each bot's pair was
+observed skipping the other's branches.
 
-Still unproven: Renovate (no Renovate installation here), Gitea, Fireworks,
-Bedrock, the release and attestation workflow, and the comment *update* path —
-only the create path has run. Treat those rows, not the project as a whole, as
-the remaining risk.
+The trigger-boundary hardening is exercised on the happy path: run 30587101886
+resolved the pull request number from the `workflow_run` event and matched it
+against the artifact's copy. The **hostile** path — a fork pull request on a
+bot-prefixed branch — has not been tested, and testing it needs a scratch fork.
+
+The review credential is held in a `model-access` GitHub Environment with a
+required reviewer, so every run above paused for manual approval before spending
+anything. Verified by observation, including a run that failed closed on an
+empty key.
+
+Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
+and the comment *update* path — only the create path has run. Treat those rows,
+not the project as a whole, as the remaining risk.
 
 ## Evidence levels
 
@@ -106,6 +117,7 @@ Things that could still invalidate a design decision.
 | Does Fireworks tolerate the `cache_control` the runtime sends? | Degraded caching, or hard failure | Live call against Fireworks |
 | Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
+| Is `permissionMode: "dontAsk"` (`action.mjs:149`) a value the agent SDK recognises? | If not, the agent may run under the SDK's default permission mode rather than the intended one. Bounded by `tools`, which is what actually decides the tool set. | Raised by the review on #5, citing an SDK v0.3.214 change that rejects unrecognised modes. Check the SDK's `PermissionMode` type |
 
 **Resolved 2026-07-30.** `/var/run/docker.sock` *is* mounted into a container
 action on a GitHub-hosted runner — it appears in the `docker run` invocation the
@@ -126,7 +138,8 @@ validation containers; validation containers themselves still never receive it.
 - [x] CloudFormation for Bedrock OIDC and static keys
 - [x] Unit tests, CodeQL, Dependabot
 - [x] Release automation with provenance and SBOM attestation
-- [ ] **End-to-end run against a real Renovate pull request**
+- [x] **End-to-end run against a real Renovate pull request** — #5, run
+      30587101886, 2026-07-30
 - [x] **End-to-end run against a real Dependabot pull request** — #3, run
       30584609805, 2026-07-30
 - [ ] Resolve the open questions above
