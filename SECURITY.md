@@ -62,6 +62,48 @@ still reach the internet. The guarantee is that it does so without your
 credentials and without a route to the host. `network: none` closes this at the
 cost of breaking any command that downloads anything.
 
+## The trigger boundary
+
+The two-workflow split is only worth anything if the privileged half cannot be
+reached by someone who is not an update bot. That property lives in the workflow
+files, **not** in this action's code, and it rests on two things.
+
+**The validate workflow must require the head repository to be the base
+repository.** A branch name is chosen by whoever opens the pull request, so
+`if: startsWith(github.head_ref, 'dependabot/')` is a filter, not a boundary —
+anyone can fork a public repository and push a branch called `dependabot/x`.
+Pair it with `github.event.pull_request.head.repo.full_name ==
+github.repository`, which the forge sets and a contributor cannot influence.
+
+**The review workflow must take the pull request number from the `workflow_run`
+event, not from the artifact.** This is the subtler one. `workflow_run` runs
+from the default branch with the base repository's full secrets, while the
+artifact it consumes was produced by a job that checked out — and therefore ran
+— pull request code. If the privileged job reads the pull request number out of
+that artifact, whoever produced the artifact chooses which pull request gets
+reviewed. Naming a genuine bot pull request makes every authorization check
+below pass truthfully, while the *evidence* stays attacker-authored. The result
+is a model call funded by the repository owner and a comment, posted with
+`pull-requests: write`, whose content was influenced by a stranger.
+
+Note what that does *not* require: no check in `auth.mjs` is defeated. The gate
+validates the pull request it is handed, which is the right question only when
+the handle is trustworthy. Take the number from
+`github.event.workflow_run.pull_requests[0].number` and compare the artifact's
+copy against it as a tamper signal.
+
+Two deployment controls make this defence in depth rather than a single
+condition:
+
+- **Put the model credential in a GitHub Environment with a required reviewer.**
+  The job then cannot obtain the credential until a human approves the run, so
+  a workflow compromise stalls instead of spending money. Restrict the
+  environment to the default branch. Environment protection rules are available
+  at no cost on public repositories.
+- **Set fork pull request workflows to require approval for all outside
+  collaborators.** The default on public repositories only gates *first-time*
+  contributors, so anyone with one merged pull request is exempt from then on.
+
 ## Supply chain
 
 You are installing an action that reads your code and holds a token. Here is

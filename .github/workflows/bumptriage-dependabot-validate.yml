@@ -23,7 +23,13 @@ concurrency:
 
 jobs:
   validate:
-    if: startsWith(github.head_ref, 'dependabot/')
+    # The branch-name check alone is not a boundary: anyone may open a fork pull
+    # request from a branch called `dependabot/…`. Requiring the head repository
+    # to be this repository is what keeps a stranger from reaching the
+    # credential-holding review workflow through the artifact this job uploads.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'dependabot/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

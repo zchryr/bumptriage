@@ -1,9 +1,11 @@
 # Privileged half of the Renovate review.
 #
-# workflow_run runs this from the default branch with the base repository's
-# permissions, so it can hold credentials and write a comment. It downloads the
-# validation transcripts as data and never executes pull request code. The agent
-# reads repository files, which is safe — reading is not running.
+# workflow_run runs this from the default branch with the base repository's full
+# secrets, so everything it trusts must be pinned to something the triggering
+# pull request cannot choose — see the job condition and the pull request number
+# step below. It downloads the validation transcripts as data and never executes
+# pull request code. The agent reads repository files, which is safe: reading is
+# not running.
 #
 # This file must exist on the default branch for the trigger to fire at all.
 #
@@ -20,12 +22,32 @@ permissions:
   contents: read
   pull-requests: write
   id-token: write
+  # Reading artifacts belonging to a different workflow run needs this.
+  actions: read
 
 jobs:
   review:
-    if: github.event.workflow_run.conclusion != 'skipped'
+    # head_repository is set by the forge, not by the pull request author, so a
+    # fork cannot satisfy it. Without this check a stranger who opens a fork pull
+    # request from a `renovate/` branch reaches this job and its credentials.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    # Strongly recommended: put the model credential in a GitHub Environment with
+    # a required reviewer, so no run can spend money unattended. Uncomment after
+    # creating the environment — naming one that does not exist creates it
+    # silently with no protection at all. See SECURITY.md.
+    # environment: model-access
     steps:
+      # Checkout runs first because it cleans the workspace: downloading the
+      # transcripts before this point would delete them.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Download validation transcripts
         uses: actions/download-artifact@v8
         with:
@@ -35,28 +57,41 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read pull request number
+      # The number comes from the workflow_run event, which the forge populates.
+      # Taking it from the artifact instead would let whoever produced that
+      # artifact name any pull request they liked — including a genuine bot one,
+      # which passes the action's authorization gate while the evidence bundle
+      # stays under their control. The artifact's copy is compared against the
+      # event's only as a tamper signal.
+      - name: Resolve pull request number
         id: pr
+        env:
+          EVENT_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
-          case "$number" in
-            ''|*[!0-9]*) echo "Refusing to continue: malformed pull request number." >&2; exit 1 ;;
+          case "$EVENT_NUMBER" in
+            ''|*[!0-9]*)
+              echo "Refusing to continue: the workflow_run event carried no pull request number." >&2
+              exit 1 ;;
           esac
-          echo "number=$number" >> "$GITHUB_OUTPUT"
+          artifact_number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
+          if [ "$artifact_number" != "$EVENT_NUMBER" ]; then
+            echo "Refusing to continue: artifact reports PR $artifact_number, event reports $EVENT_NUMBER." >&2
+            exit 1
+          fi
+          echo "number=$EVENT_NUMBER" >> "$GITHUB_OUTPUT"
 
-      # The pull request head is checked out as inert data for the agent to read
-      # with Read, Glob, and Grep. Nothing in this job builds, installs, or runs
-      # it — that already happened in the unprivileged job.
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
+      # The pull request head is fetched as inert data for the agent to read with
+      # Read, Glob, and Grep. Nothing in this job builds, installs, or runs it —
+      # that already happened in the unprivileged job.
       - name: Fetch pull request commits
         run: git fetch origin "pull/${{ steps.pr.outputs.number }}/head:bumptriage-head"
 
       # Exchanges the workflow's OIDC identity for short-lived Bedrock
       # credentials. No AWS keys are stored in this repository.
+      #
+      # WARNING: iam/bedrock-oidc-role.yaml cannot currently be assumed — it
+      # conditions on `workflow_ref`, which is not an AWS IAM condition key. Use
+      # static access keys until it is rewritten; see docs/OIDC.md.
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.BUMPTRIAGE_RENOVATE_ROLE_ARN }}
@@ -72,4 +107,8 @@ jobs:
           pr-number: ${{ steps.pr.outputs.number }}
           bots: renovate
           trusted-authors: renovate[bot]
+          # Pins trust to the hosted Renovate app rather than to a name. A
+          # self-hosted Renovate runs under a different account — look up its
+          # numeric id, or omit this input.
+          trusted-author-ids: "29139614"
           validation-results: bumptriage-validation/validations.json

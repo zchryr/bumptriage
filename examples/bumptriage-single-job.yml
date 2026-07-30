@@ -28,7 +28,12 @@ permissions:
 
 jobs:
   review:
-    if: startsWith(github.head_ref, 'renovate/')
+    # This job holds credentials and runs pull request code, so the fork check is
+    # not optional. A branch name is chosen by whoever opened the pull request;
+    # the head repository is not.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'renovate/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

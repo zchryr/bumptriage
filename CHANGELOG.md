@@ -44,6 +44,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Pull requests from forks are rejected unless `allow-forks` is set.
 - A login ending in `[bot]` must be a bot account where the forge reports a type.
 - The model subprocess environment is a strict allowlist.
+- The example and dogfooding workflows close a path from a fork pull request to
+  the credential-holding review job. A branch-name `if` is a filter, not a
+  boundary, so the validate workflows now also require the head repository to be
+  the base repository. The review workflows take the pull request number from
+  the `workflow_run` event rather than from the artifact produced by the job
+  that ran pull request code — otherwise whoever produced that artifact chose
+  which pull request was reviewed, passing every authorization check truthfully
+  while supplying their own evidence. `SECURITY.md` documents this as the
+  trigger boundary.
+- `trusted-author-ids` is set in the examples, pinning trust to the update bot's
+  numeric account id rather than to a claimable name.
 
 ### Known limitations
 

@@ -4,6 +4,11 @@
 # transcripts the untrusted job produced, reads the repository, and posts one
 # comment. The credentials live here; the execution happened over there.
 #
+# workflow_run runs from the default branch with the base repository's full
+# secrets, so everything it trusts has to be pinned to something the triggering
+# pull request cannot choose. See the notes on the job condition and on
+# resolving the pull request number.
+#
 # This is the dogfooding copy. Consumers install the version in examples/, which
 # refers to a release tag instead of the working tree.
 
@@ -23,8 +28,17 @@ permissions:
 
 jobs:
   review:
-    if: github.event.workflow_run.conclusion != 'skipped'
+    # head_repository is set by the forge, not by the pull request author, so a
+    # fork cannot satisfy it. Without this a stranger opening a fork pull request
+    # from a `dependabot/` branch reaches this job — and its secrets.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    # Holds the model credential behind a required reviewer, so no run can spend
+    # money until a human approves it. Restricted to the main branch.
+    environment: model-access
     steps:
       # Checkout runs first on purpose: it cleans the workspace, so downloading
       # the transcripts before this point would delete them.
@@ -41,16 +55,28 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # The pull request number comes from the untrusted job, so it is checked
-      # rather than trusted.
-      - name: Read pull request number
+      # The number comes from the workflow_run event, which the forge populates.
+      # Taking it from the artifact instead would let whoever produced the
+      # artifact name any pull request they liked — including a real bot one,
+      # which would pass the action's authorization gate while the evidence
+      # bundle stayed under their control. The artifact's copy is compared
+      # against it purely as a tamper signal.
+      - name: Resolve pull request number
         id: pr
+        env:
+          EVENT_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
-          case "$number" in
-            ''|*[!0-9]*) echo "Refusing to continue: malformed pull request number." >&2; exit 1 ;;
+          case "$EVENT_NUMBER" in
+            ''|*[!0-9]*)
+              echo "Refusing to continue: the workflow_run event carried no pull request number." >&2
+              exit 1 ;;
           esac
-          echo "number=$number" >> "$GITHUB_OUTPUT"
+          artifact_number="$(jq -r '.number' bumptriage-validation/pull-request.json)"
+          if [ "$artifact_number" != "$EVENT_NUMBER" ]; then
+            echo "Refusing to continue: artifact reports PR $artifact_number, event reports $EVENT_NUMBER." >&2
+            exit 1
+          fi
+          echo "number=$EVENT_NUMBER" >> "$GITHUB_OUTPUT"
 
       # Unauthenticated, which works because this repository is public.
       - name: Fetch pull request commits
@@ -67,4 +93,6 @@ jobs:
           pr-number: ${{ steps.pr.outputs.number }}
           bots: dependabot
           trusted-authors: dependabot[bot]
+          # Pins trust to GitHub's Dependabot app rather than to a name.
+          trusted-author-ids: "49699333"
           validation-results: bumptriage-validation/validations.json

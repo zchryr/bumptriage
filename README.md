@@ -60,6 +60,13 @@ A [single-job setup](examples/bumptriage-single-job.yml) also exists. It is simp
 and weaker: one job both holds the credentials and runs the update, with only the
 sandbox between them. It does not work for Dependabot at all.
 
+On a public repository, do two more things before adding a model credential: put
+it in a GitHub Environment with yourself as a required reviewer, and set fork
+pull request workflows to require approval for all outside collaborators. The
+review job spends money, and a branch name is chosen by whoever opens the pull
+request. [SECURITY.md](SECURITY.md#the-trigger-boundary) explains what that
+protects against.
+
 ## Model providers
 
 | Provider | `base-url` | Credentials | Status |
