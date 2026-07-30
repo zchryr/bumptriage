@@ -1,0 +1,55 @@
+# Untrusted half of bumptriage reviewing its own Renovate pull requests.
+#
+# This job must never hold a secret. It has a read-only token, no `id-token`
+# permission, and produces nothing but evidence. The privileged half runs in
+# bumptriage-renovate-review.yml, triggered by workflow_run.
+#
+# This is the dogfooding copy. Consumers install the version in examples/, which
+# refers to a release tag instead of the working tree.
+
+name: bumptriage renovate validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bumptriage-renovate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    # The branch-name check alone is not a boundary: anyone may open a fork pull
+    # request from a branch called `renovate/…`. Requiring the head repository to
+    # be this repository is what keeps a stranger from reaching the
+    # credential-holding review workflow through the artifact this job uploads.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The composite action comes from the checkout rather than a release tag,
+      # so a change to validate/ is exercised by the pull request that makes it.
+      - uses: ./validate
+        with:
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          image: node:24-bookworm-slim
+          commands: |
+            npm ci
+            npm test
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bumptriage-validation
+          path: bumptriage-validation/
+          retention-days: 1

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": [
+    "Renovate manages npm here; Dependabot keeps github-actions and docker.",
+    "Both bots would otherwise open a pull request for the same update, and",
+    "every duplicate costs a bumptriage review. Splitting by ecosystem also",
+    "means both bot profiles get exercised against the real action.",
+    "Branch prefix is left at the default `renovate/`, which is what the",
+    "review workflow and the action's bot profiles match on."
+  ],
+  "enabledManagers": ["npm"],
+  "packageRules": [
+    {
+      "description": [
+        "The agent SDK is the one dependency whose update genuinely changes",
+        "behaviour, so it is never batched with anything else."
+      ],
+      "matchPackageNames": ["@anthropic-ai/claude-agent-sdk"],
+      "groupName": null
+    }
+  ]
+}

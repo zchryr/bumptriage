@@ -14,18 +14,10 @@ updates:
     commit-message:
       prefix: "chore(actions)"
 
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      npm:
-        patterns: ["*"]
-        # The agent SDK is the one dependency whose update genuinely changes
-        # behaviour, so it is reviewed on its own rather than inside a batch.
-        exclude-patterns: ["@anthropic-ai/*"]
+  # npm is deliberately absent: Renovate manages it, per renovate.json. Both
+  # bots watching the same ecosystem would open duplicate pull requests, and
+  # each duplicate costs a bumptriage review. Splitting by ecosystem also keeps
+  # both bot profiles exercised against the real action.
 
   # Base images in the Dockerfile are pinned by digest for the same reason as
   # the actions above.

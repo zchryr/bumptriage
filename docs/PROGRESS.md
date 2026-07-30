@@ -20,9 +20,12 @@ the `anthropic` provider.
 [run]: https://github.com/zchryr/bumptriage/actions/runs/30584609805
 
 The repository dogfoods itself:
-`.github/workflows/bumptriage-dependabot-{validate,review}.yml` run the
-two-workflow topology against this repository's own Dependabot pull requests,
-using the working tree (`uses: ./`) rather than a release tag.
+`.github/workflows/bumptriage-{dependabot,renovate}-{validate,review}.yml` run
+the two-workflow topology against this repository's own bot pull requests, using
+the working tree (`uses: ./`) rather than a release tag. Renovate manages npm
+and Dependabot manages github-actions and docker, so the two never open a
+duplicate pull request and both bot profiles get exercised. The Renovate half is
+wired but has not yet produced a comment.
 
 Still unproven: Renovate (no Renovate installation here), Gitea, Fireworks,
 Bedrock, the release and attestation workflow, and the comment *update* path —
