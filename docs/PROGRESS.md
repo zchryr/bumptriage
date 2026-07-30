@@ -39,6 +39,13 @@ required reviewer, so every run above paused for manual approval before spending
 anything. Verified by observation, including a run that failed closed on an
 empty key.
 
+On review quality, one data point worth keeping: the review on #1 was handed
+green `npm ci` and `npm test` transcripts produced on `node:24` for a pull
+request whose whole content was moving the Dockerfile to `node:25`. It said so,
+unprompted, and traced the same gap through `ci.yml` and both validate
+workflows. Evidence that is misleading rather than merely thin is the case this
+project exists for, and it was not taken at face value.
+
 Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
 and the comment *update* path — only the create path has run. Treat those rows,
 not the project as a whole, as the remaining risk.
@@ -177,6 +184,13 @@ Deliberate, documented, not defects.
 
 - One validation image applies to every command; polyglot repositories build
   their own.
+- `validation-image` is a plain string in the workflow, so no updater maintains
+  it. Dependabot's docker ecosystem reads `Dockerfile` FROM lines, not workflow
+  inputs, and Renovate here is scoped to npm. It therefore drifts away from the
+  runtime the action actually ships on, and validation quietly starts proving
+  something about the wrong version. Surfaced by the review on #1, which noticed
+  that its own evidence had been produced on `node:24` while the pull request
+  moved the Dockerfile to `node:25`.
 - The sandbox isolates credentials and the host, not the network. Validation can
   reach the internet unless `network: none` is set, which breaks installs.
 - The snapshot excludes `.git`, so `git describe`-derived versioning fails.
