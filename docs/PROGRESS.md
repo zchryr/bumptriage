@@ -190,7 +190,11 @@ Deliberate, documented, not defects.
   runtime the action actually ships on, and validation quietly starts proving
   something about the wrong version. Surfaced by the review on #1, which noticed
   that its own evidence had been produced on `node:24` while the pull request
-  moved the Dockerfile to `node:25`.
+  moved the Dockerfile to `node:25`. Mitigated here only by moving the two in
+  the same commit, by hand, every time the base image changes. The consumer-
+  facing default in `action.yml` is deliberately left alone: it governs the
+  image a consumer's own code is validated in, which has nothing to do with the
+  runtime this action ships on.
 - The sandbox isolates credentials and the host, not the network. Validation can
   reach the internet unless `network: none` is set, which breaks installs.
 - The snapshot excludes `.git`, so `git describe`-derived versioning fails.
