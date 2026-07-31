@@ -44,7 +44,7 @@ jobs:
         with:
           head-sha: ${{ github.event.pull_request.head.sha }}
           pr-number: ${{ github.event.pull_request.number }}
-          image: node:24-bookworm-slim
+          image: node:25-bookworm-slim
           commands: |
             npm ci
             npm test

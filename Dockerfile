@@ -11,7 +11,7 @@ FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b4
 
 # Dependencies are installed in a separate stage so npm's cache — around 130MB,
 # and useless at runtime — never becomes a layer in the published image.
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS deps
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS deps
 WORKDIR /action
 # `npm ci` installs exactly what the lockfile records, with integrity hashes,
 # rather than re-resolving versions at build time.
@@ -19,7 +19,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund \
     && npm cache clean --force
 
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
