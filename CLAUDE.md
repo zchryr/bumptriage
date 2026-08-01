@@ -51,10 +51,18 @@ questions. Two rules:
   Unit tests with the external system faked are 🟡, not ✅.
 - **Record what you ran**, not just the outcome, so the claim can be rechecked.
 - **Verify a claim before recording it — including one made by bumptriage's own
-  review.** Two have been wrong here: a fabricated validation image, and a stale
-  branch name a human then repeated back. Both were settled in seconds against
-  the runner log, the downloaded artifact, or the diff. A review is evidence to
-  check, not a source to quote.
+  review, and including one made by a vendor's own documentation.** Three have
+  been wrong here: a fabricated validation image, a stale branch name a human
+  then repeated back, and Fireworks' compatibility page. Each was settled in
+  seconds or minutes against the runner log, the downloaded artifact, the diff,
+  or one HTTP request. A plausible source is evidence to check, not a source to
+  quote.
+- **Never write a compatibility workaround before making one call against the
+  thing it works around.** The Fireworks workaround was written from the
+  vendor's own page plus a corroborating bug report, was committed, and was
+  wrong in every particular. Its unit tests passed, because they asserted the
+  workaround was present. A workaround that is wrong does not fail loudly — it
+  quietly degrades something that already worked.
 
 If a change resolves or invalidates an entry under Open questions, update that
 table in the same commit.
@@ -79,6 +87,32 @@ side-effecting collaborators as injectable parameters (`fetchImpl`, `spawnImpl`,
 - `validate/` — a composite action for the untrusted job in the two-workflow
   setup. Imports `sandbox.mjs`, which has no dependencies outside Node's
   standard library, so it needs no install step.
+
+## Providers
+
+- **Fireworks needs no compatibility workarounds, whatever its docs say.** Its
+  Anthropic-compatibility page lists `cache_control` and `eager_input_streaming`
+  as unsupported and a bug report shows both rejected with a 400. Both are
+  accepted, `x-api-key` authenticates, and prompt caching genuinely engages —
+  a real run returned non-zero `cache_read_input_tokens`. Setting
+  `DISABLE_PROMPT_CACHING` here would switch off caching that works and charge
+  the user for it. Run `scripts/fireworks-smoke.mjs` before touching the
+  fireworks arm of `provider.mjs`; it carries a negative control (an invented
+  field, which Fireworks *does* reject) so its assertions cannot pass vacuously.
+- **"Everything was accepted" is not evidence without a negative control.** An
+  endpoint that ignores unknown fields and one that supports them look identical
+  until you send something that ought to fail.
+- **A provider can be exercised end to end locally** — no CI, no Docker, no
+  release. Set the `BUMPTRIAGE_*` variables and run `node src/action.mjs` with
+  `BUMPTRIAGE_POST_COMMENT=false`, a token from `gh auth token`, and
+  `BUMPTRIAGE_VALIDATION_RESULTS` pointing at an artifact from an earlier
+  validate run (`gh run download <id>`). That is the whole path minus the
+  comment, against a real pull request, and it is what earns a ✅.
+- **The agent runtime's behaviour is readable.** Which environment variables it
+  honours and which fields it puts on the wire are strings in
+  `node_modules/@anthropic-ai/claude-agent-sdk-<platform>/claude`. Grepping it
+  answers questions documentation only guesses at — but it tells you what is
+  *sent*, never what the endpoint *accepts*. Only a call tells you that.
 
 ## Security model (load-bearing, not incidental)
 
@@ -148,8 +182,11 @@ are near-copies of `examples/`, so a fix to one usually belongs in both.
   bundle, a small fast model reported a validation transcript's container image
   as the version the pull request was migrating *away* from and built a finding
   on it, while still returning `merge`. It degrades by inventing specific,
-  checkable claims — not by giving up or malforming output. `docs/PROGRESS.md`
-  and `examples/providers.md` carry the detail.
+  checkable claims — not by giving up or malforming output. The floor is about
+  capability, not vendor or model family: `kimi-k3` on Fireworks reviewed #2
+  through the full path with no fabricated claims. That is n=1 on the easiest
+  shape of pull request this tool sees, and does not license dropping the floor.
+  `docs/PROGRESS.md` and `examples/providers.md` carry the detail.
 
 ## No private infrastructure
 
