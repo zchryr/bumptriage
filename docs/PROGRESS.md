@@ -60,12 +60,30 @@ The same conclusion was reached with the evidence pointing both ways, which
 means it came from the diff's `node:24 → node:25` strings rather than from the
 transcript. The first pass was right by coincidence, not by reading.
 
-Two things follow. The plumbing is fine — evidence assembly delivered the
-correct field, so this is model behaviour on `claude-haiku-4-5-20251001`, not a
-defect in the code. And the advisory-only framing of `recommendation` in
-`README.md` and `SECURITY.md` is not boilerplate: here is a review fabricating a
-specific, checkable, false claim about its own evidence while returning
-`merge`.
+Third pass, rerunning the *same* run so the artifact and prompt were byte-identical
+and only `BUMPTRIAGE_MODEL` changed, from `claude-haiku-4-5-20251001` to
+`claude-sonnet-5`. It read the field correctly and cited it by name — *"matching
+the new image per the `validations[].image` field"*. It also, unprompted:
+
+- noticed this pull request is **not** a pure Dependabot bump, reasoning from
+  `.github/dependabot.yml` that the docker ecosystem watches only the Dockerfile,
+  therefore the workflow and docs hunks were human-authored despite the pull
+  request being attributed to `dependabot[bot]` — correct, and the right thing to
+  flag on a bot-attributed change;
+- ran the prompt-injection check and reported the negative explicitly;
+- found that `sandbox.test.mjs` injects a fake `spawnImpl`, so no real
+  `child_process` behaviour is exercised under the new runtime.
+
+**Conclusion: this was a model ceiling, not a prompt or plumbing defect.** The
+same bundle produced a fabricated finding on Haiku 4.5 and an accurate,
+substantially sharper review on Sonnet 5. Treat Sonnet-class as the floor for
+this task; the reviewing model is doing long-context, many-turn reasoning over
+structured evidence, and a cheaper model degrades by inventing evidence rather
+than by admitting uncertainty — which is the worst available failure mode.
+
+The advisory-only framing of `recommendation` in `README.md` and `SECURITY.md`
+is not boilerplate either: the Haiku run fabricated a specific, checkable, false
+claim about its own evidence while returning `merge`.
 
 Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
 and comment upsert across more than one page of comments. Treat those rows, not

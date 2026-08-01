@@ -190,3 +190,22 @@ relying on it:
   range people typically run locally tend to drift out of tool-call format part
   way through. The plumbing is the easy part; holding the format for a whole
   review is not.
+
+## Choosing a model
+
+Whatever provider you use, this task rewards a capable model, and it is worth
+knowing *how* a weaker one fails here.
+
+Running the same pull request twice with a byte-identical evidence bundle and
+only the model changed, a small fast model reported a validation transcript's
+container image as the version the pull request was migrating *away* from, and
+built a "no test evidence from the target version exists" finding on that — while
+still returning `merge`. The image was recorded correctly in the evidence it was
+given. A larger model read the same field correctly, cited it by name, and
+additionally flagged that the pull request contained hand-authored changes
+despite being attributed to a bot.
+
+The failure mode to plan for is not a model that gives up or malforms its output.
+It is a model that invents a specific, checkable claim about evidence it was
+handed, stated with the same confidence as the true parts of the report. Budget
+accordingly, and never gate an unattended merge on `recommendation`.
