@@ -74,6 +74,14 @@ the new image per the `validations[].image` field"*. It also, unprompted:
 - found that `sandbox.test.mjs` injects a fake `spawnImpl`, so no real
   `child_process` behaviour is exercised under the new runtime.
 
+Independently confirmed on #2 (`docker:27-cli` → `28-cli`). The review correctly
+reported the validation image as `node:24`, correctly distinguished
+`buildDockerRunArgs`'s flag *assertions* from any actual invocation of the new
+binary, and flagged that the head branch is named `docker-29-cli` while the diff
+is 27→28 — a stale name left behind when Dependabot retargeted the pull request.
+That last point was checked and is true; it had been missed by the human running
+the experiment, who described the change as a two-major-version jump.
+
 **Conclusion: this was a model ceiling, not a prompt or plumbing defect.** The
 same bundle produced a fabricated finding on Haiku 4.5 and an accurate,
 substantially sharper review on Sonnet 5. Treat Sonnet-class as the floor for
