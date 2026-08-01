@@ -93,6 +93,26 @@ The advisory-only framing of `recommendation` in `README.md` and `SECURITY.md`
 is not boilerplate either: the Haiku run fabricated a specific, checkable, false
 claim about its own evidence while returning `merge`.
 
+**One counter-weight, recorded so the floor is not mistaken for a vendor rule.**
+On 2026-08-01, `kimi-k3` on Fireworks reviewed #2 through the full `action.mjs`
+path with the same artifact the Sonnet 5 run used. Every checkable claim it made
+was verified against the tree and every one was right: `Dockerfile:32`,
+`validate/run.mjs:11`, `ci.yml:43` and `:47`, the `sha256:625d9431…` digest, the
+`61/61` test count read out of the transcript, and six separate `sandbox.mjs`
+line ranges. It caught two of the three things Sonnet 5 caught — the flag-
+assertions-versus-real-invocation distinction, and the stale `docker-29-cli`
+branch name on a 27→28 diff — and ran the prompt-injection check, reporting the
+negative.
+
+It did **not** state the validation image, which is the field Haiku 4.5
+fabricated on #1. So it avoided that trap by not engaging with it rather than by
+reading it correctly, and that is a weaker result than it first appears.
+
+This is n=1 on a single-line digest bump, which is the easiest shape of pull
+request this tool sees. It does not overturn the Sonnet-class floor and should
+not be quoted as if it did. What it does show is that the floor is about
+capability, not about vendor or model family.
+
 Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
 and comment upsert across more than one page of comments. Treat those rows, not
 the project as a whole, as the remaining risk.
@@ -138,7 +158,7 @@ of quietly passing.
 | Sandbox flags (`buildDockerRunArgs`) | ✅ verified | Unit tests incl. negative assertions on `--privileged` and the Docker socket |
 | Sandbox execution | ✅ verified | Ran against a real repository and daemon; see Isolation below |
 | Provider — anthropic | ✅ verified | Live call to `api.anthropic.com` with `claude-haiku-4-5-20251001`, run 30584609805 |
-| Provider — fireworks | ✅ verified | Live on 2026-08-01. Seven `/v1/messages` probes across three models, then a full agent run through the shipped provider config — 6 turns, real `Read`/`Glob`/`Grep` calls, `subtype: success`, both answers factually correct. Re-checkable with `scripts/fireworks-smoke.mjs` |
+| Provider — fireworks | ✅ verified | Live on 2026-08-01: seven `/v1/messages` probes across three models, then a **complete review of PR #2 through `action.mjs`** on `kimi-k3` — real forge calls, live authorization gate, real diff, the genuine validation artifact. Re-checkable with `scripts/fireworks-smoke.mjs` |
 | Provider — bedrock | ⚪ untested | Env shape asserted; no live Bedrock call |
 | Forge — GitHub | ✅ verified | Read PR #3 and posted a comment, run 30584609805 |
 | Forge — Gitea | ⚪ untested | No live API call at all |
@@ -190,7 +210,7 @@ Things that could still invalidate a design decision.
 | Does `runs.image` accept a digest reference? | Release pinning falls back to a mutable tag | First release proves it |
 | Can Dependabot runs mint an OIDC token? | Nothing — the two-workflow split makes it moot | Canary on a real Dependabot PR |
 | Does `runs.env` work on Gitea's act_runner? | Gitea users get missing-variable errors, which fail loudly | Run on a Gitea instance |
-| Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe. One data point: `kimi-k3` on Fireworks held format over 6 turns of `Read`/`Glob`/`Grep` |
+| Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe. Not a concern for a hosted Fireworks model: `kimi-k3` held format through a complete review of #2 without a malformed call |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
 
 **Resolved 2026-08-01.** *Does Fireworks tolerate the `cache_control` the runtime
