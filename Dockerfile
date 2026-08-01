@@ -7,7 +7,7 @@
 # Base images are pinned by digest, not tag, so a rebuild produces the same
 # thing and a moved tag cannot change what is published. Dependabot keeps them
 # current; see .github/dependabot.yml.
-FROM docker:27-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c AS docker-cli
+FROM docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS docker-cli
 
 # Dependencies are installed in a separate stage so npm's cache — around 130MB,
 # and useless at runtime — never becomes a layer in the published image.
