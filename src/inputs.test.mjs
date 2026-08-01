@@ -129,12 +129,47 @@ test("only none and bridge are accepted network policies", () => {
   );
 });
 
+const FIREWORKS_MODEL = "accounts/fireworks/models/example-model";
+
 test("fireworks supplies its own endpoint, since the provider names a service", () => {
   const inputs = readInputs(
-    env({ BUMPTRIAGE_PROVIDER: "fireworks", BUMPTRIAGE_BASE_URL: "" }),
+    env({
+      BUMPTRIAGE_PROVIDER: "fireworks",
+      BUMPTRIAGE_BASE_URL: "",
+      BUMPTRIAGE_MODEL: FIREWORKS_MODEL,
+    }),
   );
   assert.equal(inputs.baseUrl, "https://api.fireworks.ai/inference");
   assert.equal(validateInputs(inputs).provider, "fireworks");
+});
+
+test("fireworks rejects an Anthropic-style model name up front", () => {
+  // This is the mistake a copy-paste from the Anthropic example produces, and
+  // it would otherwise surface as an endpoint error about an unknown model.
+  assert.throws(
+    () =>
+      validateInputs(
+        readInputs(env({ BUMPTRIAGE_PROVIDER: "fireworks", BUMPTRIAGE_MODEL: "claude-sonnet-4-5" })),
+      ),
+    /must be a Fireworks model resource name/,
+  );
+});
+
+test("fireworks accepts a router and a non-fireworks account", () => {
+  for (const model of [
+    "accounts/fireworks/routers/example-router",
+    "accounts/my-org/models/private-model",
+  ]) {
+    const inputs = validateInputs(
+      readInputs(env({ BUMPTRIAGE_PROVIDER: "fireworks", BUMPTRIAGE_MODEL: model })),
+    );
+    assert.equal(inputs.model, model);
+  }
+});
+
+test("the model resource-name rule applies to fireworks only", () => {
+  const inputs = validateInputs(readInputs(env({ BUMPTRIAGE_MODEL: "claude-sonnet-4-5" })));
+  assert.equal(inputs.model, "claude-sonnet-4-5");
 });
 
 test("an explicit base-url still overrides a provider default", () => {
@@ -142,6 +177,7 @@ test("an explicit base-url still overrides a provider default", () => {
     env({
       BUMPTRIAGE_PROVIDER: "fireworks",
       BUMPTRIAGE_BASE_URL: "https://gateway.example.test",
+      BUMPTRIAGE_MODEL: FIREWORKS_MODEL,
     }),
   );
   assert.equal(inputs.baseUrl, "https://gateway.example.test");

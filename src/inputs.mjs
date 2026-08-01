@@ -171,6 +171,17 @@ export function validateInputs(inputs) {
       `${PREFIX}API_KEY is required when provider is ${JSON.stringify(inputs.provider)}.`,
     );
   }
+  if (inputs.provider === "fireworks" && !inputs.model.startsWith("accounts/")) {
+    // Fireworks addresses models by resource name — `accounts/<account>/models/<id>`,
+    // or `accounts/fireworks/routers/<id>` for a router. An Anthropic-style name
+    // is accepted by every layer here and only fails at the endpoint, where the
+    // error names a model rather than the mistake, so reject it up front.
+    throw new Error(
+      `${PREFIX}MODEL must be a Fireworks model resource name for the fireworks provider, ` +
+        `such as "accounts/fireworks/models/<model-id>", not ${JSON.stringify(inputs.model)}. ` +
+        "Look up the exact id in the Fireworks model catalogue; see examples/providers.md.",
+    );
+  }
   if (PROVIDERS_REQUIRING_BASE_URL.includes(inputs.provider) && !inputs.baseUrl) {
     throw new Error(
       `${PREFIX}BASE_URL is required when provider is ${JSON.stringify(inputs.provider)}. ` +

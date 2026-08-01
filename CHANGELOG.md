@@ -19,6 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `anthropic`, `fireworks`, and `bedrock` model providers. `base-url` points
   `anthropic` at any Anthropic-Messages-compatible endpoint; `fireworks` serves
   that API directly and supplies its own.
+- The `fireworks` provider authenticates with the `x-fireworks-api-key` header
+  and disables prompt caching, because Fireworks rejects `cache_control` with a
+  `400` rather than ignoring it. It also refuses an Anthropic-style model name up
+  front, since Fireworks addresses models as `accounts/<account>/models/<id>`.
+  `scripts/fireworks-smoke.mjs` verifies all of this against a real key.
 - CloudFormation templates for a Bedrock role assumed via GitHub OIDC, and a
   static-key alternative. The OIDC template is **not yet usable** — see Known
   limitations.
@@ -61,8 +66,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Providers are limited to those serving the Anthropic Messages API. Anything
   speaking OpenAI's chat-completions format needs a translating proxy in front,
   which is out of scope here rather than planned.
-- Nothing has been run against a live pull request yet. `docs/PROGRESS.md`
-  records which components are proven and which are merely written.
+- Only the `anthropic` provider and the GitHub forge have been exercised against
+  a live pull request. Fireworks, Bedrock, and Gitea share the code path but have
+  never been called; the release and attestation workflow has never run.
+  `docs/PROGRESS.md` records which components are proven and which are merely
+  written.
 - `iam/bedrock-oidc-role.yaml` cannot be assumed. It conditions on
   `workflow_ref`, which is not an AWS IAM condition key, so the trust policy
   never matches. It fails closed, so the role is unusable rather than insecure.

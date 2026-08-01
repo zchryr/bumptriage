@@ -16,8 +16,8 @@ For anything that speaks OpenAI's chat-completions format instead, see
 |---|---|---|---|
 | `anthropic` | `https://api.anthropic.com` | `api-key` | supported |
 | `anthropic` (self-hosted) | your endpoint | `api-key` | supported |
-| `fireworks` | defaulted | `api-key` | supported |
-| `bedrock` | not required | AWS credential chain | supported |
+| `fireworks` | defaulted | `api-key` | supported, never called live |
+| `bedrock` | not required | AWS credential chain | supported, never called live |
 
 ---
 
@@ -82,16 +82,38 @@ endpoint, since the provider names one specific service.
 Notes:
 
 - `model` must be a Fireworks model resource name
-  (`accounts/fireworks/models/<id>`), not an Anthropic model name. Look up the
-  exact id in their model catalogue.
+  (`accounts/fireworks/models/<id>`, or `accounts/fireworks/routers/<id>` for a
+  router), not an Anthropic model name. Look up the exact id in their model
+  catalogue. An Anthropic-style name is rejected before any request is made,
+  with a message saying so.
 - Requests must go to `api.fireworks.ai/inference`, which is the default here.
   Direct per-model route endpoints do not serve this API.
-- **Unverified:** the agent runtime sends `cache_control` for prompt caching.
-  Whether Fireworks accepts and ignores it, or rejects it, has not been tested
-  from here. Expect at worst the loss of caching, at best nothing. Confirm
-  against your own key before relying on it in CI — and see
-  [`docs/PROGRESS.md`](../docs/PROGRESS.md), which tracks this as an open
-  question.
+- **Prompt caching is switched off, and cannot be switched on.** Fireworks does
+  not accept `cache_control` and returns `invalid_request_error` naming the
+  offending field rather than ignoring it, so leaving caching enabled fails
+  every request rather than merely costing money. bumptriage sets
+  `DISABLE_PROMPT_CACHING` for this provider. The cost is real: a review
+  re-sends its evidence bundle on each turn, so expect to pay more per review
+  here than against a provider that caches.
+- Authentication uses the `x-fireworks-api-key` header, which is how Fireworks'
+  own Claude Code integration authenticates. You still pass the key as
+  `api-key`; bumptriage arranges the header.
+
+### Verifying it against your own key
+
+The Fireworks configuration is derived from vendor documentation and from the
+pinned runtime binary, not from a call anyone here has made — see the provider
+row in [`docs/PROGRESS.md`](../docs/PROGRESS.md). One command settles it:
+
+```bash
+FIREWORKS_API_KEY=fw_... node scripts/fireworks-smoke.mjs
+```
+
+It probes all three plausible authentication headers and then deliberately
+sends the two fields Fireworks is documented to reject, so the output tells you
+both that your key works and whether the compatibility switches are still
+needed. If a field probe comes back *accepted*, the corresponding switch in
+`src/provider.mjs` has become unnecessary.
 
 ## AWS Bedrock with OIDC
 

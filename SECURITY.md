@@ -56,6 +56,15 @@ Each validation container runs with:
 Separately, no secret is passed on the command line. Inputs arrive as environment
 variables via `runs.env`.
 
+The model subprocess receives an allowlisted environment rather than an inherited
+one, so the forge token never reaches it. One provider needs its credential
+embedded in a header rather than passed as a key — Fireworks authenticates with
+`x-fireworks-api-key`, which the runtime can only send through a variable it
+parses as newline-separated `Name: Value` pairs. A key containing a line break
+would therefore append arbitrary headers to every model request, so the key is
+rejected if it contains one. In practice this catches a secret stored with a
+trailing newline rather than an attacker, since the value is operator-supplied.
+
 **What this does not do:** prevent exfiltration. Installing dependencies needs
 network access, so the default policy permits it and a malicious package can
 still reach the internet. The guarantee is that it does so without your
