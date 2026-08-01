@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // Live compatibility probe for the Fireworks provider.
 //
-// The Fireworks provider is configured from vendor documentation and from
-// strings in the pinned runtime binary, not from a call that was ever made.
-// This script makes the call. It exists so the open question in
-// docs/PROGRESS.md can be closed with an observation rather than an argument,
-// and so the two compatibility switches in provider.mjs can be shown to be
-// necessary rather than superstitious.
+// Fireworks' Anthropic-compatibility documentation lists `cache_control` and
+// `eager_input_streaming` as unsupported, and a bug report against another
+// Anthropic-protocol client shows them being rejected with a 400. Both were
+// accepted when this script was last run (2026-08-01), on three different
+// models. The documentation is stale, and a workaround written from it would
+// disable prompt caching that demonstrably works.
+//
+// So this is a regression probe, not an exploration: it asserts that the
+// provider needs no workarounds, and fails if that stops being true. Run it
+// before changing anything in the fireworks arm of src/provider.mjs.
 //
 // It is deliberately not part of `npm test`: it needs a credential and the
 // network, and the test suite needs neither.
@@ -16,7 +20,7 @@
 import process from "node:process";
 
 const apiKey = process.env.FIREWORKS_API_KEY;
-const model = process.argv[2] ?? "accounts/fireworks/models/kimi-k2p5";
+const model = process.argv[2] ?? "accounts/fireworks/models/kimi-k3";
 const baseUrl = (process.env.FIREWORKS_BASE_URL ?? "https://api.fireworks.ai/inference").replace(
   /\/+$/,
   "",
@@ -31,13 +35,7 @@ if (/[\r\n]/.test(apiKey)) {
   process.exit(2);
 }
 
-/**
- * @param {string} label
- * @param {object} body
- * @param {Record<string,string>} headers
- */
-async function probe(label, body, headers) {
-  const started = Date.now();
+async function probe(label, body, headers, expect) {
   let response;
   try {
     response = await fetch(`${baseUrl}/v1/messages`, {
@@ -46,87 +44,89 @@ async function probe(label, body, headers) {
       body: JSON.stringify(body),
     });
   } catch (error) {
-    return { label, ok: false, status: 0, detail: `network error: ${error.message}` };
+    return { label, expect, ok: false, detail: `network error: ${error.message}` };
   }
   const text = await response.text();
-  let detail = text.slice(0, 400);
+  let parsed = null;
   try {
-    const parsed = JSON.parse(text);
-    detail = parsed?.error?.message ?? parsed?.content?.[0]?.text ?? detail;
+    parsed = JSON.parse(text);
   } catch {
-    // Leave the raw prefix in place; a non-JSON body is itself the finding.
+    // A non-JSON body is itself the finding; fall through with the raw prefix.
   }
-  return {
-    label,
-    ok: response.ok,
-    status: response.status,
-    ms: Date.now() - started,
-    detail: String(detail).replaceAll("\n", " ").slice(0, 300),
-  };
+  const detail = response.ok
+    ? `in=${parsed?.usage?.input_tokens ?? "?"} cache_read=${parsed?.usage?.cache_read_input_tokens ?? 0}`
+    : String(parsed?.error?.message ?? text)
+        .replaceAll("\n", " ")
+        .slice(0, 120);
+  return { label, expect, ok: response.ok, status: response.status, detail };
 }
 
-const minimal = {
+const tool = { name: "noop", description: "does nothing", input_schema: { type: "object", properties: {} } };
+const base = {
   model,
-  max_tokens: 16,
+  max_tokens: 8,
   messages: [{ role: "user", content: "Reply with the single word: ok" }],
 };
-
-// A tool definition carrying cache_control, which is what the runtime sends
-// when prompt caching is left on. If this succeeds, DISABLE_PROMPT_CACHING is
-// unnecessary and provider.mjs should be simplified.
-const withCacheControl = {
-  ...minimal,
-  tools: [
-    {
-      name: "noop",
-      description: "does nothing",
-      input_schema: { type: "object", properties: {} },
-      cache_control: { type: "ephemeral" },
-    },
-  ],
-};
-
-// Same, for the other field the runtime can attach to a tool schema.
-const withEagerStreaming = {
-  ...minimal,
-  tools: [
-    {
-      name: "noop",
-      description: "does nothing",
-      input_schema: { type: "object", properties: {} },
-      eager_input_streaming: true,
-    },
-  ],
-};
+const auth = { "x-fireworks-api-key": apiKey };
 
 const results = [];
 
-// Authentication, three ways. Fireworks documents `Authorization: Bearer` for
-// the raw API and `x-fireworks-api-key` for its Claude Code integration;
-// `x-api-key` is what the Anthropic protocol sends by default. Which of these
-// the endpoint actually honours decides what provider.mjs must set.
-results.push(await probe("auth: x-fireworks-api-key", minimal, { "x-fireworks-api-key": apiKey }));
-results.push(await probe("auth: Authorization Bearer", minimal, { authorization: `Bearer ${apiKey}` }));
-results.push(await probe("auth: x-api-key", minimal, { "x-api-key": apiKey }));
+// Authentication. `x-api-key` is what the Anthropic protocol — and therefore
+// ANTHROPIC_API_KEY — sends, so that row is the one src/provider.mjs relies on.
+results.push(await probe("auth: x-api-key", base, { "x-api-key": apiKey }, "accept"));
+results.push(await probe("auth: Authorization Bearer", base, { authorization: `Bearer ${apiKey}` }, "accept"));
+results.push(await probe("auth: x-fireworks-api-key", base, auth, "accept"));
+results.push(await probe("auth: none", base, {}, "reject"));
 
-const authHeader = { "x-fireworks-api-key": apiKey };
-results.push(await probe("field: tools[].cache_control", withCacheControl, authHeader));
-results.push(await probe("field: tools[].eager_input_streaming", withEagerStreaming, authHeader));
+// The two fields the documentation calls unsupported. Both are sent by the
+// runtime; if either starts being rejected, every review against Fireworks
+// breaks and the fix is a switch in the fireworks arm of provider.mjs.
+results.push(
+  await probe(
+    "field: tools[].cache_control",
+    { ...base, tools: [{ ...tool, cache_control: { type: "ephemeral" } }] },
+    auth,
+    "accept",
+  ),
+);
+results.push(
+  await probe(
+    "field: tools[].eager_input_streaming",
+    { ...base, tools: [{ ...tool, eager_input_streaming: true }] },
+    auth,
+    "accept",
+  ),
+);
 
-let width = 0;
-for (const r of results) width = Math.max(width, r.label.length);
+// Control. Fireworks validates tool schemas strictly and rejects genuinely
+// unknown fields, which is what makes the two rows above meaningful: they are
+// accepted because they are supported, not because the parser is lax. If this
+// row starts passing, the probe above has stopped proving anything.
+results.push(
+  await probe(
+    "control: unknown tool field",
+    { ...base, tools: [{ ...tool, totally_made_up_field: true }] },
+    auth,
+    "reject",
+  ),
+);
+
+const width = Math.max(...results.map((r) => r.label.length));
+let failures = 0;
 for (const r of results) {
-  const verdict = r.ok ? "accepted" : `rejected ${r.status}`;
-  console.log(`${r.label.padEnd(width)}  ${verdict.padEnd(13)}  ${r.detail}`);
+  const matched = r.expect === (r.ok ? "accept" : "reject");
+  if (!matched) failures += 1;
+  const verdict = r.ok ? "accepted" : `rejected ${r.status ?? ""}`.trim();
+  console.log(
+    `${matched ? "ok  " : "FAIL"}  ${r.label.padEnd(width)}  ${verdict.padEnd(13)}  ${r.detail}`,
+  );
 }
 
 console.log(
-  "\nExpected from the documented behaviour: at least one auth header accepted, and both\n" +
-    "field probes rejected with invalid_request_error. A field probe that is *accepted*\n" +
-    "means the corresponding switch in src/provider.mjs is no longer needed.\n" +
-    "Record what you observed in docs/PROGRESS.md — see the SOP in CLAUDE.md.",
+  failures === 0
+    ? "\nAll probes matched. The fireworks provider needs no compatibility workarounds."
+    : `\n${failures} probe(s) did not match. Fireworks' behaviour has changed — reconcile ` +
+        "src/provider.mjs and the provider row in docs/PROGRESS.md before shipping.",
 );
 
-// Exit non-zero only when no authentication method worked at all: the field
-// probes are expected to fail, and their failing is the point.
-process.exitCode = results.slice(0, 3).some((r) => r.ok) ? 0 : 1;
+process.exitCode = failures === 0 ? 0 : 1;

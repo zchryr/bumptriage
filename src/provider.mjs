@@ -61,43 +61,18 @@ const AWS_VARIABLES = Object.freeze([
 ]);
 
 /**
- * Fireworks' Anthropic-compatibility layer rejects two fields the runtime would
- * otherwise send, with a 400 rather than by ignoring them, so both have to be
- * suppressed before the first request rather than tolerated.
+ * Reject a credential that cannot be sent as a header value.
  *
- * `cache_control` — Fireworks lists it as unsupported and returns
- * `invalid_request_error` naming `tools[N].cache_control`. `DISABLE_PROMPT_CACHING`
- * is the runtime's own switch for omitting it everywhere. The cost is real: no
- * prompt caching, so a review re-sends its whole evidence bundle each turn.
- *
- * `eager_input_streaming` — attached to tool schemas when a feature gate is on.
- * The gate is remote and defaults off, which would make this work by luck;
- * setting the fine-grained-tool-streaming switch to a false value short-circuits
- * the check outright, so behaviour does not depend on a flag we do not control.
- *
- * Both variable names were confirmed against the pinned runtime binary rather
- * than taken from documentation written for a different client.
- */
-const FIREWORKS_COMPATIBILITY = Object.freeze({
-  DISABLE_PROMPT_CACHING: "1",
-  CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING: "0",
-});
-
-/**
- * Reject a credential that could break out of the header it is embedded in.
- *
- * `ANTHROPIC_CUSTOM_HEADERS` is parsed by splitting on newlines and then on the
- * first colon, so a key containing CR or LF would inject additional headers into
- * every model request. The value here is operator-supplied rather than
- * attacker-supplied, which makes this a guard against a mangled secret — a
- * trailing newline survives a copy-paste or a `cat`-ed file more often than
- * anyone expects — rather than against an adversary.
+ * A key carrying a stray CR or LF — which is what a secret stored with a
+ * trailing newline looks like — otherwise fails deep inside the runtime with an
+ * error about the request rather than about the credential. This turns that into
+ * one readable line at startup.
  */
 function assertHeaderSafe(apiKey) {
   if (/[\r\n]/.test(apiKey)) {
     throw new Error(
-      "The API key contains a line break, which would inject extra headers into every " +
-        "model request. Check for a trailing newline in the secret.",
+      "The API key contains a line break, so it cannot be sent as a header. Check for a " +
+        "trailing newline in the secret.",
     );
   }
 }
@@ -123,35 +98,22 @@ export function buildProvider(inputs, processEnv = process.env) {
   const options = {};
 
   switch (provider) {
-    case "anthropic": {
-      if (!inputs.apiKey) {
-        throw new Error(`An API key is required for the ${provider} provider.`);
-      }
-      assertHeaderSafe(inputs.apiKey);
-      env.ANTHROPIC_API_KEY = inputs.apiKey;
-      if (inputs.baseUrl) env.ANTHROPIC_BASE_URL = inputs.baseUrl;
-      break;
-    }
-
-    // Fireworks serves the Anthropic Messages API directly, so it shares the
-    // wire protocol — but not the authentication or the accepted field set, so
-    // it is not simply `anthropic` with a different URL.
+    // Fireworks serves the Anthropic Messages API directly and accepts the same
+    // `x-api-key` authentication, so it needs nothing beyond its own endpoint
+    // and a model id in resource-name form. Verified on 2026-08-01 against a
+    // live key: `x-api-key`, `Authorization: Bearer`, and `x-fireworks-api-key`
+    // are all accepted on /v1/messages, and prompt caching is honoured rather
+    // than rejected. It stays a distinct provider value so that "supported" is a
+    // claim about a specific service, and so `inputs.mjs` can supply its
+    // endpoint and enforce its model-id rule.
+    case "anthropic":
     case "fireworks": {
       if (!inputs.apiKey) {
         throw new Error(`An API key is required for the ${provider} provider.`);
       }
       assertHeaderSafe(inputs.apiKey);
-
-      // Fireworks reads `x-fireworks-api-key`; this is how the vendor's own
-      // Claude Code integration authenticates, and the runtime has no other way
-      // to send a header it does not know about. `ANTHROPIC_API_KEY` is set as
-      // well, for a different reason: without a credential in the variable it
-      // looks for, the runtime treats the session as unauthenticated and looks
-      // for an interactive login, which never arrives in CI.
       env.ANTHROPIC_API_KEY = inputs.apiKey;
-      env.ANTHROPIC_CUSTOM_HEADERS = `x-fireworks-api-key: ${inputs.apiKey}`;
       if (inputs.baseUrl) env.ANTHROPIC_BASE_URL = inputs.baseUrl;
-      Object.assign(env, FIREWORKS_COMPATIBILITY);
       break;
     }
 

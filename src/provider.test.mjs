@@ -168,58 +168,24 @@ test("fireworks requires an API key", () => {
   );
 });
 
-test("fireworks authenticates with the header Fireworks actually reads", () => {
+test("fireworks carries no compatibility workarounds", () => {
+  // Probed against a live key on 2026-08-01: Fireworks accepts x-api-key, and
+  // accepts cache_control and eager_input_streaming rather than rejecting them.
+  // Nothing here should be suppressing either — an unnecessary
+  // DISABLE_PROMPT_CACHING would turn off caching that demonstrably works and
+  // charge the user for it. See scripts/fireworks-smoke.mjs.
   const { env } = buildProvider(fireworksInputs, {});
-  // Fireworks reads x-fireworks-api-key. The runtime can only send a header it
-  // does not know about through this variable, which it parses as newline-
-  // separated `Name: Value` pairs split on the first colon.
-  assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, "x-fireworks-api-key: fw-key");
+  assert.equal(env.DISABLE_PROMPT_CACHING, undefined);
+  assert.equal(env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING, undefined);
+  assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, undefined);
 });
 
-test("fireworks suppresses the two fields its endpoint rejects with a 400", () => {
-  const { env } = buildProvider(fireworksInputs, {});
-  // Not cosmetic: Fireworks returns invalid_request_error naming
-  // `tools[N].cache_control` rather than ignoring the field, so leaving prompt
-  // caching on fails every request rather than merely costing money.
-  assert.equal(env.DISABLE_PROMPT_CACHING, "1");
-  // Setting this to a false value short-circuits the runtime's check outright,
-  // so eager_input_streaming cannot be attached by a remote feature gate
-  // flipping on later.
-  assert.equal(env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING, "0");
-});
-
-test("neither compatibility switch leaks into the other providers", () => {
-  for (const inputs of [anthropicInputs, bedrockInputs]) {
-    const { env } = buildProvider(inputs, {
-      AWS_REGION: "us-east-1",
-      AWS_ACCESS_KEY_ID: "x",
-      AWS_SECRET_ACCESS_KEY: "y",
-    });
-    assert.equal(env.DISABLE_PROMPT_CACHING, undefined, inputs.provider);
-    assert.equal(
-      env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING,
-      undefined,
-      inputs.provider,
-    );
-    assert.equal(env.ANTHROPIC_CUSTOM_HEADERS, undefined, inputs.provider);
-  }
-});
-
-test("an API key containing a line break is refused rather than embedded", () => {
-  // ANTHROPIC_CUSTOM_HEADERS is newline-delimited, so a key with a trailing
-  // newline would append an attacker- or accident-controlled header to every
-  // model request.
-  for (const provider of ["anthropic", "fireworks"]) {
-    const inputs = provider === "fireworks" ? fireworksInputs : anthropicInputs;
-    assert.throws(
-      () => buildProvider({ ...inputs, apiKey: "fw-key\nx-injected: value" }, {}),
-      /line break/,
-      provider,
-    );
+test("an API key containing a line break is refused", () => {
+  for (const inputs of [anthropicInputs, fireworksInputs]) {
     assert.throws(
       () => buildProvider({ ...inputs, apiKey: "fw-key\r\n" }, {}),
       /line break/,
-      provider,
+      inputs.provider,
     );
   }
 });

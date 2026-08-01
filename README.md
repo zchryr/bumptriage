@@ -73,7 +73,7 @@ protects against.
 |---|---|---|---|
 | `anthropic` | `https://api.anthropic.com` | `api-key` | supported |
 | `anthropic` (self-hosted) | your endpoint | `api-key` | supported |
-| `fireworks` | defaulted | `api-key` | supported, never called live |
+| `fireworks` | defaulted | `api-key` | supported |
 | `bedrock` | not required | AWS credential chain | supported, never called live |
 
 Copy-paste configurations for each are in
@@ -86,12 +86,12 @@ for opposite reasons: `bedrock` derives its endpoint from the AWS region, and
 `anthropic` selects a *protocol* rather than a service — it can point at a
 vendor, a gateway, or your own server — so it has no default and never will.
 
-Fireworks serves the Anthropic Messages API directly, so it needs no translation
-layer — but it is not simply `anthropic` with a different URL. It authenticates
-with its own header, addresses models by resource name
-(`accounts/fireworks/models/<id>`), and rejects `cache_control` outright, so
-prompt caching is disabled for that provider and reviews cost more per run.
-`scripts/fireworks-smoke.mjs` checks all of this against your own key.
+Fireworks serves the Anthropic Messages API directly, so it works through the
+same code path as Anthropic with no translation and no workarounds — including
+prompt caching. The one difference is that models are addressed by resource name
+(`accounts/fireworks/models/<id>`) rather than by an Anthropic model name, and an
+Anthropic-style name is rejected before any request is made.
+`scripts/fireworks-smoke.mjs` re-checks that against your own key.
 
 OpenAI and Ollama speak the chat-completions format, which the agent
 runtime does not implement — its provider list is closed and there is no

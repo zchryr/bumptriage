@@ -97,13 +97,27 @@ Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
 and comment upsert across more than one page of comments. Treat those rows, not
 the project as a whole, as the remaining risk.
 
-The Fireworks row moved from ⚪ to 🟡 on 2026-08-01 without a live call. What
-changed is that the configuration is now derived from the vendor's compatibility
-spec and from the pinned runtime binary instead of from the assumption that
-"serves the Anthropic API" meant "needs nothing special" — it needs its own
-authentication header and two switches, without which every request fails. That
-is a real improvement in the odds and no improvement at all in the evidence, and
-the row says so. See the resolved question below.
+**Fireworks is now proven, and the way it was proven is the point.** On
+2026-08-01 the provider was first "fixed" from vendor documentation: the
+compatibility page lists `cache_control` and `eager_input_streaming` as
+unsupported, and a bug report against another Anthropic-protocol client showed
+Fireworks rejecting both with a 400. That produced a custom authentication
+header and two suppression switches, all written before any call was made.
+
+Every part of it was wrong. Against a live key, `x-api-key` authenticates,
+`cache_control` and `eager_input_streaming` are both accepted, and a full agent
+run reported `cache_read_input_tokens: 2048` — the caching the "fix" would have
+disabled was working. The documentation is stale, and shipping the workaround
+would have quietly charged users more per review to route around a problem that
+no longer exists.
+
+The control probe is what makes this trustworthy rather than a second guess: an
+invented field is still rejected — `Extra inputs are not permitted, field:
+'tools[0].totally_made_up_field'` — so Fireworks does validate tool schemas
+strictly, and the two fields are accepted because they are supported, not
+because the parser is lax. `scripts/fireworks-smoke.mjs` keeps that control
+alongside the assertions, so if the behaviour reverts the probe says so instead
+of quietly passing.
 
 ## Evidence levels
 
@@ -124,7 +138,7 @@ the row says so. See the resolved question below.
 | Sandbox flags (`buildDockerRunArgs`) | ✅ verified | Unit tests incl. negative assertions on `--privileged` and the Docker socket |
 | Sandbox execution | ✅ verified | Ran against a real repository and daemon; see Isolation below |
 | Provider — anthropic | ✅ verified | Live call to `api.anthropic.com` with `claude-haiku-4-5-20251001`, run 30584609805 |
-| Provider — fireworks | 🟡 unit only | Configured against the vendor's compatibility spec and against strings in the pinned runtime binary; unit tests cover the header and both switches. Never called live — run `scripts/fireworks-smoke.mjs` |
+| Provider — fireworks | ✅ verified | Live on 2026-08-01. Seven `/v1/messages` probes across three models, then a full agent run through the shipped provider config — 6 turns, real `Read`/`Glob`/`Grep` calls, `subtype: success`, both answers factually correct. Re-checkable with `scripts/fireworks-smoke.mjs` |
 | Provider — bedrock | ⚪ untested | Env shape asserted; no live Bedrock call |
 | Forge — GitHub | ✅ verified | Read PR #3 and posted a comment, run 30584609805 |
 | Forge — Gitea | ⚪ untested | No live API call at all |
@@ -176,32 +190,32 @@ Things that could still invalidate a design decision.
 | Does `runs.image` accept a digest reference? | Release pinning falls back to a mutable tag | First release proves it |
 | Can Dependabot runs mint an OIDC token? | Nothing — the two-workflow split makes it moot | Canary on a real Dependabot PR |
 | Does `runs.env` work on Gitea's act_runner? | Gitea users get missing-variable errors, which fail loudly | Run on a Gitea instance |
-| Does the Fireworks configuration actually authenticate, and are both compatibility switches still required? | The provider is unusable, or carries two switches it does not need | `scripts/fireworks-smoke.mjs` with a real key |
-| Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe |
+| Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe. One data point: `kimi-k3` on Fireworks held format over 6 turns of `Read`/`Glob`/`Grep` |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
 
 **Resolved 2026-08-01.** *Does Fireworks tolerate the `cache_control` the runtime
-sends?* **No, and it fails hard rather than degrading.** Fireworks lists
-`cache_control` as unsupported in its Anthropic-compatibility documentation and
-returns `400 invalid_request_error` naming the offending field — reported in the
-wild against another Anthropic-protocol client, which hit it on both
-`tools[N].cache_control` and `tools[N].eager_input_streaming`. So the impact
-recorded against this question was wrong in the direction that matters: it was
-"degraded caching, or hard failure", and it is hard failure on every request.
+sends?* **Yes — it accepts it and actually caches.** Probed on three models
+(`kimi-k3`, `deepseek-v4-flash`, `glm-5p2`) in all three positions the runtime
+attaches it: system block, message content block, and tool definition. All
+accepted. `glm-5p2` returned non-zero `cache_read_input_tokens` on the probe,
+and a full agent run through the shipped configuration returned
+`cache_read_input_tokens: 2048`, so caching is honoured end to end and not
+merely tolerated.
 
-Both fields are emitted by the pinned runtime. Confirmed by reading the binary
-in `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` rather than
-by inference: `cache_control` is attached when caching is on, and
-`eager_input_streaming` is attached when a remote feature gate is enabled — the
-gate defaults off, which would have made this work by luck rather than by
-design. `DISABLE_PROMPT_CACHING=1` and
-`CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=0` suppress them; the truthiness
-helpers the runtime applies to both were read from the same binary, so the
-values are the ones it actually accepts.
+`eager_input_streaming` is likewise accepted on tool definitions across all
+three models, so no suppression is needed there either.
 
-Note what is still open, and why the row above is 🟡 rather than ✅: none of
-this is a call anyone has made. It is vendor documentation plus static reading
-of the runtime. `scripts/fireworks-smoke.mjs` closes it in one command.
+This contradicts Fireworks' own compatibility documentation, which lists both as
+unsupported, and a bug report showing them rejected with a 400. The most likely
+reading is that support was added and the documentation was not updated. The
+practical lesson is the one already recorded elsewhere on this page: a plausible
+secondary source is evidence to check, not a source to quote. A workaround built
+from that documentation reached a commit here before a single call was made, and
+it would have disabled working prompt caching and charged users for it.
+
+The provider needs **no** compatibility workarounds. `scripts/fireworks-smoke.mjs`
+asserts that, and carries a control probe with an invented field so the
+assertions cannot pass vacuously.
 
 **Resolved 2026-07-30.** `permissionMode: "dontAsk"` (`action.mjs:149`) is a
 value the agent SDK recognises. In 0.3.220 the type is

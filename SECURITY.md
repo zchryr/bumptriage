@@ -57,13 +57,10 @@ Separately, no secret is passed on the command line. Inputs arrive as environmen
 variables via `runs.env`.
 
 The model subprocess receives an allowlisted environment rather than an inherited
-one, so the forge token never reaches it. One provider needs its credential
-embedded in a header rather than passed as a key — Fireworks authenticates with
-`x-fireworks-api-key`, which the runtime can only send through a variable it
-parses as newline-separated `Name: Value` pairs. A key containing a line break
-would therefore append arbitrary headers to every model request, so the key is
-rejected if it contains one. In practice this catches a secret stored with a
-trailing newline rather than an attacker, since the value is operator-supplied.
+one, so the forge token never reaches it. A model API key containing a line break
+is rejected at startup: it cannot be sent as a header value, and failing early
+with a message about the credential beats failing later with a message about the
+request. In practice this catches a secret stored with a trailing newline.
 
 **What this does not do:** prevent exfiltration. Installing dependencies needs
 network access, so the default policy permits it and a malicious package can
