@@ -4,7 +4,7 @@ Status of the project against what has actually been proven, rather than what
 has been written. **Update this file in the same commit as the change it
 describes** — see the SOP in `CLAUDE.md`.
 
-Last updated: 2026-07-30 · Target: v0.1.0 · Not yet released
+Last updated: 2026-07-31 · Target: v0.1.0 · Not yet released
 
 ## Honest summary
 
@@ -39,16 +39,37 @@ required reviewer, so every run above paused for manual approval before spending
 anything. Verified by observation, including a run that failed closed on an
 empty key.
 
-On review quality, one data point worth keeping: the review on #1 was handed
-green `npm ci` and `npm test` transcripts produced on `node:24` for a pull
-request whose whole content was moving the Dockerfile to `node:25`. It said so,
-unprompted, and traced the same gap through `ci.yml` and both validate
-workflows. Evidence that is misleading rather than merely thin is the case this
-project exists for, and it was not taken at face value.
+**On review quality, the picture is worse than it first looked, and this is the
+most important thing on this page.**
+
+First pass on #1: the transcripts were produced on `node:24` while the pull
+request moved the Dockerfile to `node:25`. The review said so, unprompted, and
+traced the gap through `ci.yml` and both validate workflows. That looked like
+exactly the behaviour this project claims.
+
+Second pass on the same pull request, after the validate workflows were moved to
+`node:25` in the same branch: the transcripts recorded
+`image: "node:25-bookworm-slim"` for both commands, `evidence.mjs:56` put that
+field in the bundle, and the review nonetheless reported *"npm ci → exit 0
+(image: node:24-bookworm-slim)"* and concluded *"No test evidence from the target
+version exists."* Verified three ways — the runner log shows only `node:25`, the
+downloaded `validations.json` records `node:25` for both commands, and the field
+is demonstrably passed to the model.
+
+The same conclusion was reached with the evidence pointing both ways, which
+means it came from the diff's `node:24 → node:25` strings rather than from the
+transcript. The first pass was right by coincidence, not by reading.
+
+Two things follow. The plumbing is fine — evidence assembly delivered the
+correct field, so this is model behaviour on `claude-haiku-4-5-20251001`, not a
+defect in the code. And the advisory-only framing of `recommendation` in
+`README.md` and `SECURITY.md` is not boilerplate: here is a review fabricating a
+specific, checkable, false claim about its own evidence while returning
+`merge`.
 
 Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
-and the comment *update* path — only the create path has run. Treat those rows,
-not the project as a whole, as the remaining risk.
+and comment upsert across more than one page of comments. Treat those rows, not
+the project as a whole, as the remaining risk.
 
 ## Evidence levels
 
@@ -73,7 +94,7 @@ not the project as a whole, as the remaining risk.
 | Provider — bedrock | ⚪ untested | Env shape asserted; no live Bedrock call |
 | Forge — GitHub | ✅ verified | Read PR #3 and posted a comment, run 30584609805 |
 | Forge — Gitea | ⚪ untested | No live API call at all |
-| Comment upsert | 🟡 unit only | Create path ran for real; the *update* path and >1 page of comments are still unproven |
+| Comment upsert | ✅ verified | Create path on #3/#4/#5; **update** path on #1 — comment id 5137399011 edited in place on a second review rather than duplicated. >1 page of comments still unproven |
 | Evidence assembly / truncation | 🟡 unit only | Real transcripts reached the model and were quoted back; the truncation budget was never approached |
 | Verdict parsing | 🟡 unit only | Several report shapes tested; the `recommendation` output value was not inspected on the live run |
 | Agent invocation | ✅ verified | `query()` ran to completion and produced a report, run 30584609805 |
