@@ -50,6 +50,11 @@ questions. Two rules:
   Moving a row to ✅ is a factual claim that it was executed and observed.
   Unit tests with the external system faked are 🟡, not ✅.
 - **Record what you ran**, not just the outcome, so the claim can be rechecked.
+- **Verify a claim before recording it — including one made by bumptriage's own
+  review.** Two have been wrong here: a fabricated validation image, and a stale
+  branch name a human then repeated back. Both were settled in seconds against
+  the runner log, the downloaded artifact, or the diff. A review is evidence to
+  check, not a source to quote.
 
 If a change resolves or invalidates an entry under Open questions, update that
 table in the same commit.
@@ -97,6 +102,54 @@ means changing that file too.
   pass the body through as bounded untrusted evidence.
 - **Authorization is required, not advisory:** trusted author, bot branch prefix,
   no forks by default. `trusted-authors` has no default value.
+- **The trigger boundary lives in the workflows, not in `auth.mjs`.** A
+  branch-name `if` is a filter, not a boundary — anyone can fork a public
+  repository and push a `dependabot/`-prefixed branch. Two conditions carry it,
+  and both must survive any edit to a review workflow or an example:
+  - validate jobs require
+    `github.event.pull_request.head.repo.full_name == github.repository`;
+  - review jobs require
+    `github.event.workflow_run.head_repository.full_name == github.repository`,
+    and take the pull request number from
+    `github.event.workflow_run.pull_requests[0].number` — **never** from the
+    artifact, which was produced by a job that executed pull request code.
+
+  `auth.mjs` cannot cover this, and was never defeated when it was missing: the
+  gate validates the pull request it is *handed*, so naming a genuine bot pull
+  request passes every check truthfully while the evidence bundle stays
+  attacker-authored. See the trigger boundary section in `SECURITY.md`.
+
+## This repository dogfoods itself
+
+`.github/workflows/bumptriage-{dependabot,renovate}-{validate,review}.yml` run
+the two-workflow topology against this repository's own bot pull requests, using
+the working tree (`uses: ./` and `./validate`) rather than a release tag. They
+are near-copies of `examples/`, so a fix to one usually belongs in both.
+
+- **Renovate manages npm; Dependabot manages github-actions and docker.**
+  `renovate.json` sets `enabledManagers: ["npm"]` and `.github/dependabot.yml`
+  omits npm. Both bots watching one ecosystem means duplicate pull requests and
+  a duplicate paid review every time. Do not re-add npm to Dependabot.
+- **Any job using the model credential must declare `environment: model-access`.**
+  The key is an environment secret behind a required reviewer, not a repository
+  secret. Omitting the declaration fails quietly — the job just gets no key.
+  Naming an environment that does not exist creates it with no protection.
+- **`validation-image` and the Dockerfile base image move together, by hand.**
+  Nothing updates an `image:` string in workflow YAML: Dependabot's docker
+  ecosystem reads `Dockerfile` FROM lines, and Renovate here is scoped to npm.
+  Miss it and validation quietly starts proving something about the runtime the
+  change is migrating away from. The `validation-image` defaults in `action.yml`
+  and `validate/action.yml` are deliberately *not* kept in step — they govern the
+  image a consumer's code is validated in, not this action's runtime.
+- **`actions/checkout` runs before `actions/download-artifact`** in review
+  workflows. Checkout cleans a non-empty workspace and deletes the transcripts.
+- **The reviewing model is a floor, not a preference.** `BUMPTRIAGE_MODEL` is a
+  repository variable, currently Sonnet-class. Given a byte-identical evidence
+  bundle, a small fast model reported a validation transcript's container image
+  as the version the pull request was migrating *away* from and built a finding
+  on it, while still returning `merge`. It degrades by inventing specific,
+  checkable claims — not by giving up or malforming output. `docs/PROGRESS.md`
+  and `examples/providers.md` carry the detail.
 
 ## No private infrastructure
 
