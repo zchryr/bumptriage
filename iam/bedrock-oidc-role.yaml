@@ -46,8 +46,15 @@ Parameters:
   BedrockModelArns:
     Type: CommaDelimitedList
     Description: >-
-      Model or inference-profile ARNs this role may invoke. Prefer explicit ARNs
-      over a wildcard so the role cannot reach models you did not intend.
+      Inference-profile AND foundation-model ARNs this role may invoke. Prefer
+      explicit ARNs over the "*" default so the role cannot reach models you did
+      not intend — but narrowing this correctly needs BOTH kinds of ARN.
+      Invoking a cross-region inference profile is authorised against the
+      inference-profile ARN and against the underlying foundation-model ARN in
+      every region the profile can route to; listing only the profile produces
+      an AccessDenied that reads as though the model does not exist. The "*"
+      default hides this, so a deployment that has only ever run with the
+      default has not exercised its own least-privilege path.
     Default: "*"
 
   CreateOidcProvider:
@@ -120,6 +127,19 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource: !Ref BedrockModelArns
+
+              # See bedrock-api-key-user.yaml: documented by Anthropic as what
+              # resolves an application-inference-profile ARN to its backing
+              # model, not verified here. ListInferenceProfiles on "*" is
+              # account-wide enumeration.
+              - Effect: Allow
+                Action:
+                  - bedrock:GetInferenceProfile
+                Resource: !Ref BedrockModelArns
+              - Effect: Allow
+                Action:
+                  - bedrock:ListInferenceProfiles
+                Resource: "*"
       Tags:
         - { Key: ManagedBy, Value: bumptriage }
 

@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  IAM user scoped to Amazon Bedrock inference, for issuing a long-term Amazon
+  Bedrock API key that bumptriage passes as its api-key input. Prefer
+  bedrock-oidc-role.yaml where OIDC is available: this is still a long-lived
+  credential. Prefer this over bedrock-user.yaml everywhere else, for two
+  reasons set out below.
+
+Metadata:
+  Comment: >-
+    This template deliberately creates no credential.
+
+    There is no AWS::IAM::ServiceSpecificCredential resource type, so the API
+    key cannot be minted by CloudFormation. That turns out to be the better
+    arrangement: bedrock-user.yaml returns a secret access key as a stack
+    output, readable by anyone who can describe the stack, whereas the key
+    created by the command in the Outputs below is printed once to the operator
+    who runs it and never enters CloudFormation state.
+
+    It also attaches a narrow inline policy rather than the AWS-managed
+    AmazonBedrockLimitedAccess that the Bedrock console attaches by default.
+    That managed policy grants a large fraction of the Bedrock service,
+    including creating and deleting guardrails. Reviewing a pull request needs
+    model invocation and nothing else.
+
+Parameters:
+  UserName:
+    Type: String
+    Description: Name for the created IAM user.
+    Default: bumptriage-review
+
+  BedrockModelArns:
+    Type: CommaDelimitedList
+    Description: >-
+      Inference-profile AND foundation-model ARNs this key may invoke. Prefer
+      explicit ARNs over the "*" default so a leaked key cannot reach models you
+      did not intend to pay for — but note that narrowing this correctly needs
+      BOTH kinds of ARN. Invoking a cross-region inference profile is authorised
+      against the inference-profile ARN and against the underlying
+      foundation-model ARN in every region the profile can route to; listing
+      only the profile produces an AccessDenied that reads as though the model
+      does not exist. The "*" default hides this, so a deployment that has only
+      ever run with the default has not exercised its own least-privilege path.
+    Default: "*"
+
+Resources:
+  ReviewUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref UserName
+      Policies:
+        - PolicyName: InvokeBedrock
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InvokeNamedModels
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: !Ref BedrockModelArns
+
+              # Authenticating with an API key is gated by its own action,
+              # separately from the right to invoke a model. Without this every
+              # request fails 403 "not authorized to perform:
+              # bedrock:CallWithBearerToken" even though InvokeModel is granted
+              # above — observed, not inferred.
+              #
+              # It is granted on "*" because it authorises the credential *type*
+              # rather than a resource; which models the key can reach is still
+              # decided by the statement above. bedrock-mantle:CallWithBearerToken
+              # is deliberately absent: bumptriage targets the Invoke API, and
+              # Mantle needs a separate model grant anyway.
+              - Sid: AllowApiKeyAuthentication
+                Effect: Allow
+                Action:
+                  - bedrock:CallWithBearerToken
+                Resource: "*"
+
+              # NOT VERIFIED HERE — believed, source not re-checked. The
+              # "IAM configuration" section of Anthropic's Claude Code on Amazon
+              # Bedrock page (code.claude.com/docs/en/amazon-bedrock, read
+              # 2026-08-01) states the runtime uses GetInferenceProfile to
+              # resolve an application-inference-profile ARN to its backing
+              # foundation model, and that without the permission it retries
+              # with the alternate request shape — costing a round trip rather
+              # than failing. That was not observed here: the proven runs used
+              # the system-defined profile
+              # us.anthropic.claude-sonnet-5, not an application profile, and
+              # scripts/bedrock-smoke.mjs does not probe profile resolution.
+              # Granted because it is additive and cheap to be wrong about; the
+              # claim about *why* is second-hand and marked as such.
+              - Sid: ResolveInferenceProfiles
+                Effect: Allow
+                Action:
+                  - bedrock:GetInferenceProfile
+                Resource: !Ref BedrockModelArns
+
+              # ListInferenceProfiles admits no resource-level scoping, so it is
+              # granted separately rather than widening the statement above.
+              # Note this is account-wide enumeration of inference profiles, not
+              # resolution limited to the ARNs named in BedrockModelArns.
+              - Sid: ListInferenceProfiles
+                Effect: Allow
+                Action:
+                  - bedrock:ListInferenceProfiles
+                Resource: "*"
+      Tags:
+        - { Key: ManagedBy, Value: bumptriage }
+
+Outputs:
+  UserArn:
+    Description: The IAM user the API key will be attached to.
+    Value: !GetAtt ReviewUser.Arn
+
+  CreateKeyCommand:
+    Description: >-
+      Run this to mint the API key. The key is the ServiceCredentialSecret field
+      (an ABSK… string) and is returned exactly once. Store it as a GitHub
+      Environment secret on the model-access environment and pass it as
+      bumptriage's api-key input. Lower --credential-age-days if you can rotate
+      more often. Needs AWS CLI v2.36 or later — earlier versions reject
+      --credential-age-days, and 2.25 silently returned no key value at all.
+      Note the response field is NOT ServiceApiKeyValue, which is what the
+      Amazon Bedrock user guide says; that name returns null.
+    Value: !Sub >-
+      aws iam create-service-specific-credential --user-name ${ReviewUser}
+      --service-name bedrock.amazonaws.com --credential-age-days 90
+      --query ServiceSpecificCredential.ServiceCredentialSecret --output text
+
+  ListKeysCommand:
+    Description: >-
+      Lists key ids and expiry for this user, without revealing key values. Use
+      it to audit what is outstanding before rotating.
+    Value: !Sub >-
+      aws iam list-service-specific-credentials --user-name ${ReviewUser}
+      --service-name bedrock.amazonaws.com
+
+  RevokeKeyCommand:
+    Description: >-
+      Revokes one key by id, taken from the list command above. A leaked key is
+      revoked here, not by deleting the stack.
+    Value: !Sub >-
+      aws iam delete-service-specific-credential --user-name ${ReviewUser}
+      --service-specific-credential-id SSC_EXAMPLE

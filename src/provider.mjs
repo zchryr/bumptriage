@@ -122,12 +122,38 @@ export function buildProvider(inputs, processEnv = process.env) {
       for (const key of AWS_VARIABLES) {
         if (processEnv[key]) env[key] = processEnv[key];
       }
+
+      // An `api-key` here is a Bedrock API key, which authenticates as a bearer
+      // token and bypasses the AWS credential chain entirely. Set after the
+      // passthrough loop so an explicitly configured key wins over one that
+      // happened to be in the runner's environment.
+      //
+      // It also wins over SigV4 credentials sitting in the same environment,
+      // but that is the runtime's doing rather than this assignment's: it skips
+      // resolving the credential chain at all when AWS_BEARER_TOKEN_BEDROCK is
+      // set. So configuring `api-key` on a runner that has already run
+      // configure-aws-credentials silently ignores the role. That is the right
+      // precedence — the explicit input should win — but it is worth knowing it
+      // is not enforced here.
+      //
+      // Verified against a live endpoint on 2026-08-01: a long-term key
+      // (ABSK…, from iam:CreateServiceSpecificCredential) authenticates on
+      // /model/{id}/invoke. Note the key alone is not sufficient — the IAM user
+      // behind it also needs `bedrock:CallWithBearerToken`, which is a separate
+      // action from InvokeModel; without it every request fails 403. See
+      // iam/bedrock-api-key-user.yaml.
+      if (inputs.apiKey) {
+        assertHeaderSafe(inputs.apiKey);
+        env.AWS_BEARER_TOKEN_BEDROCK = inputs.apiKey;
+      }
+
       if (inputs.baseUrl) env.ANTHROPIC_BEDROCK_BASE_URL = inputs.baseUrl;
 
       if (!env.AWS_REGION && !env.AWS_DEFAULT_REGION) {
         throw new Error(
-          "AWS_REGION is required for the bedrock provider. Configure credentials before " +
-            "this step, for example with aws-actions/configure-aws-credentials.",
+          "AWS_REGION is required for the bedrock provider — the endpoint is derived from " +
+            "it even when an api-key carries the authentication. Set it in the job's env, or " +
+            "configure credentials before this step with aws-actions/configure-aws-credentials.",
         );
       }
       const hasCredentials =
@@ -138,8 +164,9 @@ export function buildProvider(inputs, processEnv = process.env) {
         env.AWS_BEARER_TOKEN_BEDROCK;
       if (!hasCredentials) {
         throw new Error(
-          "No AWS credentials found in the environment for the bedrock provider. Assume a " +
-            "role with OIDC, or supply static access keys, before this step runs.",
+          "No AWS credentials found for the bedrock provider. Pass a Bedrock API key as " +
+            "api-key, or assume a role with OIDC, or supply static access keys, before this " +
+            "step runs.",
         );
       }
 

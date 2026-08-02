@@ -17,7 +17,7 @@ For anything that speaks OpenAI's chat-completions format instead, see
 | `anthropic` | `https://api.anthropic.com` | `api-key` | supported |
 | `anthropic` (self-hosted) | your endpoint | `api-key` | supported |
 | `fireworks` | defaulted | `api-key` | supported |
-| `bedrock` | not required | AWS credential chain | supported, never called live |
+| `bedrock` | not required | `api-key`, or AWS credential chain | supported |
 
 ---
 
@@ -110,6 +110,66 @@ Fireworks *does* reject, as a control — without it, "everything was accepted"
 would be indistinguishable from an endpoint that ignores whatever it is sent.
 A `FAIL` row means Fireworks' behaviour has changed and `src/provider.mjs`
 needs revisiting.
+
+## AWS Bedrock
+
+Three things apply to every Bedrock configuration below, each established
+against a live endpoint on 2026-08-01 rather than from documentation. Re-check
+them with `AWS_BEARER_TOKEN_BEDROCK=… AWS_REGION=… node scripts/bedrock-smoke.mjs`,
+which carries controls so its assertions cannot pass vacuously.
+
+- **`model` must name an inference profile.** `us.anthropic.claude-sonnet-5` is
+  accepted; the bare `anthropic.claude-sonnet-5` is refused with *"Invocation of
+  model ID … with on-demand throughput isn’t supported"*. Use the geography
+  prefix for your region, or an application-inference-profile ARN.
+- **Prompt caching works.** A probe wrote 10,404 tokens to cache and read all
+  10,404 back on the next call. Do not set `DISABLE_PROMPT_CACHING`.
+- **Service tiers are per-model.** `flex` is roughly half price and looks ideal
+  for a review nobody is waiting on, but Sonnet 5 rejects it with *"The provided
+  service tier is not supported for this model"*. Check the model card first.
+
+### Bedrock with an API key
+
+The simplest option: one secret, no credential plumbing, and it works from
+anywhere. Create the scoped IAM user with
+[`iam/bedrock-api-key-user.yaml`](../iam/bedrock-api-key-user.yaml), then run the
+`CreateKeyCommand` from the stack outputs.
+
+```yaml
+- uses: zchryr/bumptriage@v1
+  with:
+    provider: bedrock
+    model: us.anthropic.claude-sonnet-5
+    api-key: ${{ secrets.BEDROCK_API_KEY }}
+    token: ${{ secrets.GITHUB_TOKEN }}
+    repository: ${{ github.repository }}
+    pr-number: ${{ steps.pr.outputs.number }}
+    trusted-authors: renovate[bot]
+    validation-results: bumptriage-validation/validations.json
+```
+
+The job still needs `AWS_REGION` (or `AWS_DEFAULT_REGION`) in its environment,
+because the endpoint is derived from the region even when the key carries the
+authentication.
+
+Three things that will otherwise cost you an afternoon:
+
+- **The IAM user needs `bedrock:CallWithBearerToken`.** Bearer authentication is
+  a separate action from `bedrock:InvokeModel`. Granting only the latter fails
+  every request with `403 … not authorized to perform: bedrock:CallWithBearerToken`,
+  which reads like a model-access problem and is not one. The template grants it.
+- **The key is the `ServiceCredentialSecret` field**, an `ABSK…` string, not
+  `ServiceApiKeyValue` as the Amazon Bedrock user guide states. Querying the
+  documented name returns null.
+- **AWS CLI v2.36 or later.** Earlier versions reject `--credential-age-days`,
+  and v2.25 created the credential while returning no key value at all, leaving
+  an unusable credential behind that has to be deleted by id.
+
+This is a long-lived credential, which is why OIDC below is still preferable
+where it is available. Mint it with the shortest `--credential-age-days` you can
+tolerate, keep it in a GitHub Environment behind a required reviewer, and revoke
+with `aws iam delete-service-specific-credential` rather than by deleting the
+stack.
 
 ## AWS Bedrock with OIDC
 

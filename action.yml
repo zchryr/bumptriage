@@ -12,10 +12,18 @@ inputs:
     required: false
     default: anthropic
   model:
-    description: Model identifier your provider expects. For Bedrock, a model id or inference-profile ARN.
+    description: >-
+      Model identifier your provider expects. For Bedrock, an inference-profile
+      id or ARN — a bare foundation-model id is refused with "on-demand
+      throughput isn’t supported", so use the geography-prefixed form such as
+      us.anthropic.claude-sonnet-5.
     required: true
   api-key:
-    description: API key for the anthropic provider. Not used by bedrock, which reads AWS credentials from the environment.
+    description: >-
+      API key for anthropic and fireworks. For bedrock, an Amazon Bedrock API
+      key, which authenticates as a bearer token and needs no AWS credentials;
+      leave it empty to use the AWS credential chain (OIDC or static keys)
+      instead.
     required: false
   base-url:
     description: >-
