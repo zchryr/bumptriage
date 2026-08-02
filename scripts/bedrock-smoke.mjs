@@ -26,8 +26,8 @@
 // and one that supports it look identical until something that ought to fail
 // does.
 //
-// Uses bearer tokens and plain fetch, so it needs no AWS SDK and does no SigV4
-// signing. Deliberately not part of `npm test`: it needs a credential, the
+// Uses plain fetch and signs SigV4 inline, so it needs no AWS SDK and runs with
+// nothing installed. Deliberately not part of `npm test`: it needs a credential, the
 // network, and money.
 //
 // Usage, bearer token (also accepts BEDROCK_API_KEY):
@@ -155,7 +155,13 @@ if (token && accessKeyId) {
   );
 }
 if (token && /[\r\n]/.test(token)) {
-  console.error("AWS_BEARER_TOKEN_BEDROCK contains a line break — check for a trailing newline.");
+  // Name the variable that was actually set: pointing someone at
+  // AWS_BEARER_TOKEN_BEDROCK when they populated BEDROCK_API_KEY is the same
+  // class of misdirection describeCredential exists to avoid.
+  const source = process.env.AWS_BEARER_TOKEN_BEDROCK
+    ? "AWS_BEARER_TOKEN_BEDROCK"
+    : "BEDROCK_API_KEY";
+  console.error(`${source} contains a line break — check for a trailing newline.`);
   process.exit(2);
 }
 
