@@ -27,7 +27,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Amazon Bedrock API keys as an `api-key` value for the `bedrock` provider. The
   key authenticates as a bearer token and needs no AWS credential chain, so a
   Bedrock deployment can be one secret rather than a role assumption step.
-  Leaving `api-key` empty keeps the existing credential-chain behaviour.
+  Leaving `api-key` empty keeps the existing credential-chain behaviour. This
+  path still needs `AWS_REGION` in the job or step environment — the endpoint is
+  derived from it, and with no `configure-aws-credentials` step to set it, you
+  set it yourself.
 - CloudFormation templates for a Bedrock role assumed via GitHub OIDC, a
   static-key alternative, and `iam/bedrock-api-key-user.yaml` for an IAM user
   scoped to issuing a Bedrock API key. The last attaches a narrow inline policy
@@ -35,7 +38,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fraction of Bedrock including guardrail deletion, and mints no credential
   itself — there is no CloudFormation resource type for one, so the key is never
   exposed in a stack output the way `bedrock-user.yaml`'s secret access key is.
-  The OIDC template is **not yet usable** — see Known limitations.
+  The OIDC role's trust policy scopes to the repository in both of GitHub's
+  subject-claim formats, with each wildcard anchored after an `@` so a
+  similarly named repository cannot satisfy it. The OIDC template is **not yet
+  usable** — see Known limitations.
 - `scripts/bedrock-smoke.mjs`, a live probe for the Bedrock provider covering
   both credential modes, model addressing, and prompt caching, with negative
   controls so its assertions cannot pass vacuously.

@@ -41,6 +41,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # Alternative: a Bedrock API key replaces this whole step. Delete it and
+      # give the action the key plus a region — with configure-aws-credentials
+      # gone, nothing else puts AWS_REGION in the environment, and the action
+      # fails without it:
+      #
+      #   - uses: zchryr/bumptriage@v1
+      #     env:
+      #       AWS_REGION: ${{ vars.BUMPTRIAGE_AWS_REGION }}
+      #     with:
+      #       provider: bedrock
+      #       api-key: ${{ secrets.BEDROCK_API_KEY }}
+      #       # …every other input below, unchanged
+      #
+      # That is a long-lived credential, so keep it in an environment behind a
+      # required reviewer. See examples/providers.md.
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.BUMPTRIAGE_RENOVATE_ROLE_ARN }}

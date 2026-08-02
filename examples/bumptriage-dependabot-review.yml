@@ -88,6 +88,22 @@ jobs:
       - name: Fetch pull request commits
         run: git fetch origin "pull/${{ steps.pr.outputs.number }}/head:bumptriage-head"
 
+      # Alternative: a Bedrock API key replaces this whole step. Delete it and
+      # give the action the key plus a region — with configure-aws-credentials
+      # gone, nothing else puts AWS_REGION in the environment, and the action
+      # fails without it:
+      #
+      #   - uses: zchryr/bumptriage@v1
+      #     env:
+      #       AWS_REGION: ${{ vars.BUMPTRIAGE_AWS_REGION }}
+      #     with:
+      #       provider: bedrock
+      #       api-key: ${{ secrets.BEDROCK_API_KEY }}
+      #       # …every other input below, unchanged
+      #
+      # That is a long-lived credential, so keep it in an environment behind a
+      # required reviewer. See examples/providers.md.
+      #
       # WARNING: iam/bedrock-oidc-role.yaml cannot currently be assumed — it
       # conditions on `workflow_ref`, which is not an AWS IAM condition key. Use
       # static access keys until it is rewritten; see docs/OIDC.md.

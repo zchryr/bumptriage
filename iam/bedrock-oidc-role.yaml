@@ -106,12 +106,23 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                # Scope to this repository. StringLike with a trailing wildcard
-                # tolerates the immutable subject-claim format that GitHub began
-                # applying to newly created repositories on 2026-07-15, which
-                # embeds numeric owner and repository ids:
-                #   repo:owner@123/repo@456:ref:refs/heads/main
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}*/${GitHubRepository}*:*"
+                # Scope to this repository, in either subject-claim format —
+                # multiple values on one condition key are ORed:
+                #
+                #   repo:owner/repo:ref:refs/heads/main          the original
+                #   repo:owner@123/repo@456:ref:refs/heads/main  the immutable
+                #     format GitHub began applying to newly created repositories
+                #     on 2026-07-15, which embeds numeric owner and repo ids
+                #
+                # The wildcards sit *after* an `@`, never directly after the
+                # name. A bare trailing wildcard — `repo:${GitHubOwner}*/…` —
+                # reads as scoped to this repository but is not: it also matches
+                # `repo:owner-evil/repo-fork:…`, which anyone can create. Since
+                # neither an owner nor a repository name may contain `@`, the
+                # `@` anchors each wildcard to the id it exists to tolerate.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepository}:*"
+                  - !Sub "repo:${GitHubOwner}@*/${GitHubRepository}@*:*"
                 # Scope to one workflow file. This is the condition that keeps a
                 # Renovate role out of reach of the Dependabot workflow and of
                 # every other workflow in the repository. Deliberately NOT keyed

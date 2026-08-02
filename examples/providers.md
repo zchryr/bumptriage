@@ -137,6 +137,8 @@ anywhere. Create the scoped IAM user with
 
 ```yaml
 - uses: zchryr/bumptriage@v1
+  env:
+    AWS_REGION: ${{ vars.BUMPTRIAGE_AWS_REGION }}
   with:
     provider: bedrock
     model: us.anthropic.claude-sonnet-5
@@ -148,9 +150,12 @@ anywhere. Create the scoped IAM user with
     validation-results: bumptriage-validation/validations.json
 ```
 
-The job still needs `AWS_REGION` (or `AWS_DEFAULT_REGION`) in its environment,
-because the endpoint is derived from the region even when the key carries the
-authentication.
+`AWS_REGION` (or `AWS_DEFAULT_REGION`) is required, not optional: the endpoint is
+derived from the region even when the key carries the authentication, and without
+it the step fails before it makes a call. On the OIDC and static-key paths below
+it arrives from `aws-actions/configure-aws-credentials`, which this path
+deliberately does not run — so on this path you set it yourself. Job-level `env:`
+works just as well as the step-level form above.
 
 Three things that will otherwise cost you an afternoon:
 

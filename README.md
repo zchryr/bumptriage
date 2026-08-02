@@ -101,14 +101,17 @@ misbehaving.
 
 ### AWS Bedrock
 
-Three ways in, in descending order of preference.
+Three ways in, easiest first — which is the reverse of preferred. **OIDC** is the
+one to use where you can, then the **API key**, then **static keys**; the order
+below runs the other way because it starts with the least machinery.
 
-Whichever you pick, two things are true of the model id. It must be an
-**inference profile**, not a bare foundation-model id — `us.anthropic.claude-sonnet-5`
-works, `anthropic.claude-sonnet-5` is refused outright with *"on-demand
-throughput isn’t supported"*. And **prompt caching works**, so do not disable it:
-a measured run wrote 10,404 tokens to cache and read all 10,404 back on the next
-call. Service tiers are per-model — `flex` is rejected on Sonnet 5 — so check the
+Whichever you pick, three things hold, each established against a live endpoint
+rather than from documentation. `model` must name an **inference profile**, not a
+bare foundation-model id — `us.anthropic.claude-sonnet-5` works,
+`anthropic.claude-sonnet-5` is refused outright with *"on-demand throughput
+isn’t supported"*. **Prompt caching works**, so do not disable it: a measured run
+wrote 10,404 tokens to cache and read all 10,404 back on the next call. And
+**service tiers are per-model** — `flex` is rejected on Sonnet 5 — so check the
 model card before budgeting for the discount.
 
 **Bedrock API key.** One string, no AWS credential plumbing, and the least
@@ -117,6 +120,11 @@ and mint a key with the command in the stack outputs, then pass it as `api-key`:
 
 ```yaml
 - uses: zchryr/bumptriage@v1
+  env:
+    # Required. The endpoint is derived from the region even when the key
+    # carries the authentication — and because this path runs no
+    # configure-aws-credentials step, nothing else sets it for you.
+    AWS_REGION: us-west-2
   with:
     provider: bedrock
     model: us.anthropic.claude-sonnet-5

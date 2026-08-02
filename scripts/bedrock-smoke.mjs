@@ -37,6 +37,11 @@
 // unset it to reach this path:
 //   eval "$(aws configure export-credentials --format env)"
 //   AWS_REGION=us-west-2 node scripts/bedrock-smoke.mjs [model]
+//
+// [model] takes any shape `model` itself takes — a bare foundation-model id, a
+// geography-prefixed inference profile, or an inference-profile ARN. See the
+// derivation below: an application-inference-profile ARN skips the bare-id
+// control, because no bare id can be derived from it.
 
 import crypto from "node:crypto";
 import process from "node:process";
@@ -134,10 +139,39 @@ const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-e
 // The prefix is taken from the argument when it carries one, rather than always
 // assuming `us.`: passing eu.anthropic.… would otherwise probe a European
 // profile against a US region and get a rejection that proves nothing.
+//
+// The argument arrives in one of three shapes, and the prefix means something
+// different in each:
+//
+//   anthropic.claude-sonnet-5    a bare foundation-model id — prefix it to
+//                                address the profile, keep it as the control
+//   us.anthropic.claude-…        already a profile — strip it for the control
+//   arn:aws:bedrock:…:inference-profile/us.anthropic.claude-…
+//                                already addressable as-is. The control id
+//                                comes from the ARN's last segment, and an
+//                                application-inference-profile carries an
+//                                opaque id with no bare form to derive
+//
+// The ARN shape is not hypothetical: `model` accepts one, README.md and
+// examples/providers.md both show it, so it is what a maintainer verifying
+// their own configuration will pass. Treated as a plain string it became
+// `us.arn:aws:bedrock:…`, which every accept row then addressed — half the run
+// red, about a model that does not exist.
 const GEO_PREFIX = /^(us|eu|au|apac|global|us-gov)\./;
 const requestedModel = process.argv[2] ?? "anthropic.claude-sonnet-5";
-const bareModel = requestedModel.replace(GEO_PREFIX, "");
-const geoModel = `${requestedModel.match(GEO_PREFIX)?.[1] ?? "us"}.${bareModel}`;
+const isArn = requestedModel.startsWith("arn:");
+const profileId = isArn ? (requestedModel.split("/").pop() ?? "") : requestedModel;
+// Only a foundation-model id has a bare form worth probing. An opaque
+// application-profile id has none, and inventing one would fail the control for
+// the wrong reason — the failure mode this file exists to prevent.
+const bareModel = GEO_PREFIX.test(profileId)
+  ? profileId.replace(GEO_PREFIX, "")
+  : isArn
+    ? null
+    : profileId;
+const geoModel = isArn
+  ? requestedModel
+  : `${requestedModel.match(GEO_PREFIX)?.[1] ?? "us"}.${bareModel}`;
 
 if (mode === "sigv4" && !(accessKeyId && secretAccessKey)) {
   console.error(
@@ -311,7 +345,10 @@ async function invoke(label, { model = geoModel, body = {}, expect, because, ...
   results.push({ label: `invoke  ${label}`, expect, because, ...r });
 }
 
-async function mantle(label, { model = bareModel, body = {}, expect, because, ...opts }) {
+async function mantle(
+  label,
+  { model = bareModel ?? geoModel, body = {}, expect, because, ...opts },
+) {
   const r = await send(
     `${mantleHost}/v1/messages`,
     "bedrock-mantle",
@@ -342,11 +379,24 @@ await invoke("model: us. geo prefix", { expect: "accept" });
 // The exact wording matters: README.md and examples/providers.md quote it. If
 // the bare id were refused as an unknown model instead, the row would still go
 // green while the documentation became wrong.
-await invoke("control: bare in-region id", {
-  model: bareModel,
-  expect: "reject",
-  because: "on-demand throughput isn’t supported",
-});
+//
+// Skipped rather than guessed when the argument is an ARN for an application
+// inference profile, whose id says nothing about the model underneath: a control
+// that cannot be constructed honestly is worth less than no control, and a red
+// row here would be read as Bedrock having changed its behaviour.
+if (bareModel) {
+  await invoke("control: bare in-region id", {
+    model: bareModel,
+    expect: "reject",
+    because: "on-demand throughput isn’t supported",
+  });
+} else {
+  results.push({
+    label: "invoke  control: bare in-region id",
+    expect: "skip",
+    detail: `no bare model id derivable from ${requestedModel}`,
+  });
+}
 
 // Prompt caching. Two calls with a byte-identical prefix: the first writes the
 // cache, the second should read it. A non-zero read on the second row is the
@@ -403,12 +453,20 @@ for (const r of results) {
   // which is exactly what happened on the first run of this script against a
   // malformed key, where nine rows went green while proving nothing.
   const outcome = r.errored ? "errored" : r.ok ? "accept" : "reject";
+  const unasserted = r.expect === "info" || r.expect === "skip";
   const matched =
-    r.expect === "info" ||
+    unasserted ||
     (r.expect === outcome && (!r.because || String(r.reason ?? "").includes(r.because)));
   if (!matched) failures += 1;
-  const verdict = r.errored ? "ERRORED" : r.ok ? "accepted" : `rejected ${r.status ?? ""}`.trim();
-  const marker = r.expect === "info" ? "--  " : matched ? "ok  " : "FAIL";
+  const verdict =
+    r.expect === "skip"
+      ? "skipped"
+      : r.errored
+        ? "ERRORED"
+        : r.ok
+          ? "accepted"
+          : `rejected ${r.status ?? ""}`.trim();
+  const marker = unasserted ? "--  " : matched ? "ok  " : "FAIL";
   console.log(`${marker}  ${r.label.padEnd(width)}  ${verdict.padEnd(13)}  ${r.detail}`);
   if (!matched && r.because && !String(r.reason ?? "").includes(r.because)) {
     console.log(`${" ".repeat(width + 6)}  expected the reason to mention: ${r.because}`);
@@ -444,10 +502,21 @@ if (invokeCacheRead > 0) {
       "caching claims in README.md, examples/providers.md and CLAUDE.md rest on this row.",
   );
 }
+// A skipped control is reported with the summary rather than left in the rows
+// above, because "all probes matched" over a run that quietly dropped a
+// negative control is the same false reassurance as a green row that failed on
+// the credential.
+const skipped = results.filter((r) => r.expect === "skip").length;
 console.log(
   failures === 0
     ? "All probes matched. Record what ran in docs/PROGRESS.md before raising an evidence level."
     : `${failures} probe(s) did not match — read them before treating any row as evidence.`,
 );
+if (skipped > 0) {
+  console.log(
+    `${skipped} control(s) skipped: not constructible for this model argument. Re-run with a ` +
+      "foundation-model id to exercise them.",
+  );
+}
 
 process.exitCode = failures === 0 ? 0 : 1;

@@ -106,7 +106,10 @@ side-effecting collaborators as injectable parameters (`fetchImpl`, `spawnImpl`,
   prompt caching genuinely engages, so never disable it; `flex` is per-model and
   Sonnet 5 rejects it; and an API key needs **`bedrock:CallWithBearerToken`**,
   which is a separate IAM action from `bedrock:InvokeModel` — granting only the
-  latter fails every request with a 403 that names the wrong problem. AWS's own
+  latter fails every request with a 403 that names the wrong problem. The API-key
+  path also needs `AWS_REGION` in the job environment: the endpoint is derived
+  from it, and this is the one Bedrock path with no `configure-aws-credentials`
+  step to set it, so every example of it must carry the region explicitly. AWS's own
   guide also names the wrong response field for the key (`ServiceCredentialSecret`,
   not `ServiceApiKeyValue`), and AWS CLI below v2.36 creates an unretrievable
   credential rather than failing.

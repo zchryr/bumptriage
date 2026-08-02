@@ -202,6 +202,14 @@ in CI against production dependencies.
   condition key. It fails closed, so the role is unusable rather than insecure.
   The rewrite around `job_workflow_ref` is described in
   [`docs/OIDC.md`](docs/OIDC.md).
+- **The trust policy's `sub` wildcards sit after an `@`, never after a name.**
+  The condition has to tolerate GitHub's immutable subject format
+  (`repo:owner@123/repo@456:…`), and the obvious way to do that —
+  `repo:owner*/repo*:*` — also matches `repo:owner-evil/repo-fork:…`, which
+  anyone can create. Two ORed values anchor each wildcard to the id it exists
+  for. If you edit that condition, keep the anchor: it is the only thing scoping
+  the role to a repository, and a role scoped to a name *prefix* is scoped to
+  nothing.
 
 ## Authorization
 
