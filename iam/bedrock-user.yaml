@@ -13,8 +13,14 @@ Parameters:
   BedrockModelArns:
     Type: CommaDelimitedList
     Description: >-
-      Model or inference-profile ARNs this user may invoke. Prefer explicit ARNs
-      over a wildcard.
+      Inference-profile AND foundation-model ARNs this user may invoke. Prefer
+      explicit ARNs over the "*" default — but narrowing this correctly needs
+      BOTH kinds of ARN. Invoking a cross-region inference profile is authorised
+      against the inference-profile ARN and against the underlying
+      foundation-model ARN in every region the profile can route to; listing
+      only the profile produces an AccessDenied that reads as though the model
+      does not exist. The "*" default hides this, so a deployment that has only
+      ever run with the default has not exercised its own least-privilege path.
     Default: "*"
 
 Resources:
@@ -32,6 +38,19 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource: !Ref BedrockModelArns
+
+              # See bedrock-api-key-user.yaml for why these two are here, and
+              # for what about them is documented rather than observed. Note
+              # this template's static access keys authenticate with SigV4, so
+              # unlike an API key it needs no bedrock:CallWithBearerToken.
+              - Effect: Allow
+                Action:
+                  - bedrock:GetInferenceProfile
+                Resource: !Ref BedrockModelArns
+              - Effect: Allow
+                Action:
+                  - bedrock:ListInferenceProfiles
+                Resource: "*"
       Tags:
         - { Key: ManagedBy, Value: bumptriage }
 

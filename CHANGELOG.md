@@ -24,9 +24,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name would otherwise fail at the endpoint with an error naming the model rather
   than the mistake. `scripts/fireworks-smoke.mjs` verifies the provider against a
   real key, including a control probe so its assertions cannot pass vacuously.
-- CloudFormation templates for a Bedrock role assumed via GitHub OIDC, and a
-  static-key alternative. The OIDC template is **not yet usable** — see Known
-  limitations.
+- Amazon Bedrock API keys as an `api-key` value for the `bedrock` provider. The
+  key authenticates as a bearer token and needs no AWS credential chain, so a
+  Bedrock deployment can be one secret rather than a role assumption step.
+  Leaving `api-key` empty keeps the existing credential-chain behaviour. This
+  path still needs `AWS_REGION` in the job or step environment — the endpoint is
+  derived from it, and with no `configure-aws-credentials` step to set it, you
+  set it yourself.
+- CloudFormation templates for a Bedrock role assumed via GitHub OIDC, a
+  static-key alternative, and `iam/bedrock-api-key-user.yaml` for an IAM user
+  scoped to issuing a Bedrock API key. The last attaches a narrow inline policy
+  rather than the AWS-managed `AmazonBedrockLimitedAccess`, which grants a large
+  fraction of Bedrock including guardrail deletion, and mints no credential
+  itself — there is no CloudFormation resource type for one, so the key is never
+  exposed in a stack output the way `bedrock-user.yaml`'s secret access key is.
+  The OIDC role's trust policy scopes to the repository in both of GitHub's
+  subject-claim formats, with each wildcard anchored after an `@` so a
+  similarly named repository cannot satisfy it. The OIDC template is **not yet
+  usable** — see Known limitations.
+- `scripts/bedrock-smoke.mjs`, a live probe for the Bedrock provider covering
+  both credential modes, model addressing, and prompt caching, with negative
+  controls so its assertions cannot pass vacuously.
 - Gitea support behind a forge adapter, with GitHub as the tested target.
 - Release automation publishing a multi-arch image to GHCR with signed build
   provenance and SBOM attestations, then pinning `action.yml` to the resulting
@@ -66,12 +84,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Providers are limited to those serving the Anthropic Messages API. Anything
   speaking OpenAI's chat-completions format needs a translating proxy in front,
   which is out of scope here rather than planned.
-- Only the `anthropic` provider and the GitHub forge have been exercised against
-  a live pull request. `fireworks` has been verified against a live key with a
-  full agent run, but not yet on a real pull request; Bedrock and Gitea share the
-  code path but have never been called, and the release and attestation workflow
-  has never run. `docs/PROGRESS.md` records which components are proven and which
-  are merely written.
+- Every shipped model provider and the GitHub forge have been exercised against
+  a live pull request. Gitea shares the code path but has never been called, and
+  the release and attestation workflow has never run. On Bedrock, OIDC role
+  assumption specifically is unproven: SigV4 credentials work, but the assumption
+  step has not been run. `docs/PROGRESS.md` records which components are proven
+  and which are merely written.
+- On Bedrock, `model` must name an inference profile. A bare foundation-model id
+  is refused with "on-demand throughput isn’t supported". Service tiers are
+  per-model, so the discounted `flex` tier is not available everywhere — Sonnet 5
+  rejects it.
 - `iam/bedrock-oidc-role.yaml` cannot be assumed. It conditions on
   `workflow_ref`, which is not an AWS IAM condition key, so the trust policy
   never matches. It fails closed, so the role is unusable rather than insecure.

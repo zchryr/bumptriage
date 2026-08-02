@@ -99,9 +99,26 @@ side-effecting collaborators as injectable parameters (`fetchImpl`, `spawnImpl`,
   the user for it. Run `scripts/fireworks-smoke.mjs` before touching the
   fireworks arm of `provider.mjs`; it carries a negative control (an invented
   field, which Fireworks *does* reject) so its assertions cannot pass vacuously.
+- **Bedrock is proven on both credential modes, and its own docs were wrong four
+  times.** Run `scripts/bedrock-smoke.mjs` before touching the bedrock arm of
+  `provider.mjs` or the `iam/` templates. Load-bearing facts, each from a call:
+  `model` must be an inference profile (`us.`-prefixed; the bare id is refused);
+  prompt caching genuinely engages, so never disable it; `flex` is per-model and
+  Sonnet 5 rejects it; and an API key needs **`bedrock:CallWithBearerToken`**,
+  which is a separate IAM action from `bedrock:InvokeModel` — granting only the
+  latter fails every request with a 403 that names the wrong problem. The API-key
+  path also needs `AWS_REGION` in the job environment: the endpoint is derived
+  from it, and this is the one Bedrock path with no `configure-aws-credentials`
+  step to set it, so every example of it must carry the region explicitly. AWS's own
+  guide also names the wrong response field for the key (`ServiceCredentialSecret`,
+  not `ServiceApiKeyValue`), and AWS CLI below v2.36 creates an unretrievable
+  credential rather than failing.
 - **"Everything was accepted" is not evidence without a negative control.** An
   endpoint that ignores unknown fields and one that supports them look identical
-  until you send something that ought to fail.
+  until you send something that ought to fail. The corollary bit here: when a
+  probe run fails on the *credential*, every negative row passes for the wrong
+  reason and the run proves nothing. `bedrock-smoke.mjs` prints the credential's
+  shape first so that is obvious rather than inferred.
 - **A provider can be exercised end to end locally** — no CI, no Docker, no
   release. Set the `BUMPTRIAGE_*` variables and run `node src/action.mjs` with
   `BUMPTRIAGE_POST_COMMENT=false`, a token from `gh auth token`, and

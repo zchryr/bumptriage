@@ -74,7 +74,7 @@ protects against.
 | `anthropic` | `https://api.anthropic.com` | `api-key` | supported |
 | `anthropic` (self-hosted) | your endpoint | `api-key` | supported |
 | `fireworks` | defaulted | `api-key` | supported |
-| `bedrock` | not required | AWS credential chain | supported, never called live |
+| `bedrock` | not required | `api-key`, or AWS credential chain | supported |
 
 Copy-paste configurations for each are in
 [`examples/providers.md`](examples/providers.md).
@@ -101,11 +101,46 @@ misbehaving.
 
 ### AWS Bedrock
 
-Two ways in. OIDC is better — nothing is stored in your repository and
-credentials expire in an hour.
+Three ways in, easiest first — which is the reverse of preferred. **OIDC** is the
+one to use where you can, then the **API key**, then **static keys**; the order
+below runs the other way because it starts with the least machinery.
 
-**OIDC.** Deploy one role per bot, so a compromise of one workflow does not reach
-the other's model access:
+Whichever you pick, three things hold, each established against a live endpoint
+rather than from documentation. `model` must name an **inference profile**, not a
+bare foundation-model id — `us.anthropic.claude-sonnet-5` works,
+`anthropic.claude-sonnet-5` is refused outright with *"on-demand throughput
+isn’t supported"*. **Prompt caching works**, so do not disable it: a measured run
+wrote 10,404 tokens to cache and read all 10,404 back on the next call. And
+**service tiers are per-model** — `flex` is rejected on Sonnet 5 — so check the
+model card before budgeting for the discount.
+
+**Bedrock API key.** One string, no AWS credential plumbing, and the least
+machinery to get working. Deploy [`iam/bedrock-api-key-user.yaml`](iam/bedrock-api-key-user.yaml)
+and mint a key with the command in the stack outputs, then pass it as `api-key`:
+
+```yaml
+- uses: zchryr/bumptriage@v1
+  env:
+    # Required. The endpoint is derived from the region even when the key
+    # carries the authentication — and because this path runs no
+    # configure-aws-credentials step, nothing else sets it for you.
+    AWS_REGION: us-west-2
+  with:
+    provider: bedrock
+    model: us.anthropic.claude-sonnet-5
+    api-key: ${{ secrets.BEDROCK_API_KEY }}
+```
+
+It is still a long-lived credential, so give it the shortest
+`--credential-age-days` you can live with and put it behind an environment with a
+required reviewer. The IAM user needs `bedrock:CallWithBearerToken` as well as
+`bedrock:InvokeModel` — bearer authentication is gated by its own action, and
+without it every request fails with a 403 that names the wrong problem. The
+template grants both.
+
+**OIDC.** Better still where you can use it — nothing is stored in your
+repository and credentials expire in an hour. Deploy one role per bot, so a
+compromise of one workflow does not reach the other's model access:
 
 ```bash
 aws cloudformation deploy \
@@ -220,7 +255,8 @@ See [`action.yml`](action.yml) for the full list. The ones that matter most:
 | `token` | yes | Reads pull request metadata, writes the comment |
 | `repository`, `pr-number` | yes | What to review |
 | `trusted-authors` | yes | Exact account names. No default, on purpose |
-| `provider` | no | `anthropic` (default) or `bedrock` |
+| `provider` | no | `anthropic` (default), `fireworks`, or `bedrock` |
+| `api-key` | provider-dependent | Model credential. On Bedrock, a Bedrock API key |
 | `base-url` | no | Any Anthropic-Messages-compatible endpoint |
 | `bots` | no | `renovate`, `dependabot`, or both |
 | `branch-prefixes` | no | Override if you reconfigured the bot's `branchPrefix` |

@@ -127,6 +127,34 @@ test("bedrock fails clearly when region or credentials are missing", () => {
   );
 });
 
+test("bedrock accepts a Bedrock API key as the api-key input", () => {
+  const { env } = buildProvider(
+    { ...bedrockInputs, apiKey: "ABSKexamplekey" },
+    { AWS_REGION: "us-west-2" },
+  );
+  assert.equal(env.AWS_BEARER_TOKEN_BEDROCK, "ABSKexamplekey");
+  assert.equal(env.CLAUDE_CODE_USE_BEDROCK, "1");
+  // A bearer token bypasses the credential chain, so no access key is needed.
+  assert.equal(env.AWS_ACCESS_KEY_ID, undefined);
+  // The forge-facing key never reaches the model process under another name.
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+});
+
+test("bedrock api-key input overrides an ambient bearer token", () => {
+  const { env } = buildProvider(
+    { ...bedrockInputs, apiKey: "ABSKfromInput" },
+    { AWS_REGION: "us-west-2", AWS_BEARER_TOKEN_BEDROCK: "ABSKfromEnvironment" },
+  );
+  assert.equal(env.AWS_BEARER_TOKEN_BEDROCK, "ABSKfromInput");
+});
+
+test("bedrock rejects an api-key containing a line break", () => {
+  assert.throws(
+    () => buildProvider({ ...bedrockInputs, apiKey: "ABSKexample\n" }, { AWS_REGION: "us-west-2" }),
+    /line break/,
+  );
+});
+
 test("bedrock passes model overrides through as SDK options", () => {
   const overrides = { "claude-example": "arn:aws:bedrock:us-east-1:1:inference-profile/x" };
   const { options } = buildProvider(

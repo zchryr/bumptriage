@@ -179,14 +179,37 @@ in CI against production dependencies.
 - **Prefer the two-workflow setup.** It puts credentials and untrusted execution
   in different jobs, so the sandbox is a second line of defence rather than the
   only one.
-- **Scope the model credential narrowly.** The supplied Bedrock role permits
-  `bedrock:InvokeModel` on the model ARNs you name and nothing else.
+- **Scope the model credential narrowly.** The supplied Bedrock templates permit
+  invocation and inference-profile resolution on the model ARNs you name, plus
+  `bedrock:ListInferenceProfiles`, which admits no resource scoping and is
+  therefore account-wide enumeration of profile names. They deliberately do not
+  attach the AWS-managed
+  `AmazonBedrockLimitedAccess`, which the Bedrock console attaches by default and
+  which grants a large fraction of the service including creating and deleting
+  guardrails.
+- **Prefer a Bedrock API key over static access keys, and OIDC over both.** A
+  Bedrock API key is scoped to one service, carries a mandatory expiry you
+  choose, and is detected by GitHub secret scanning, which triggers an AWS
+  quarantine policy. A static access key pair has none of those properties, and
+  `iam/bedrock-user.yaml` additionally returns its secret as a CloudFormation
+  stack output readable by anyone who can describe the stack.
+  `iam/bedrock-api-key-user.yaml` creates no credential at all — there is no
+  CloudFormation resource type for one — so the key is minted by an operator and
+  never enters stack state.
 - **One IAM role per bot**, so a compromise of one workflow does not reach the
   other's model access. Note that the shipped OIDC template cannot currently be
   assumed at all: it conditions on `workflow_ref`, which is not an AWS IAM
   condition key. It fails closed, so the role is unusable rather than insecure.
   The rewrite around `job_workflow_ref` is described in
   [`docs/OIDC.md`](docs/OIDC.md).
+- **The trust policy's `sub` wildcards sit after an `@`, never after a name.**
+  The condition has to tolerate GitHub's immutable subject format
+  (`repo:owner@123/repo@456:…`), and the obvious way to do that —
+  `repo:owner*/repo*:*` — also matches `repo:owner-evil/repo-fork:…`, which
+  anyone can create. Two ORed values anchor each wildcard to the id it exists
+  for. If you edit that condition, keep the anchor: it is the only thing scoping
+  the role to a repository, and a role scoped to a name *prefix* is scoped to
+  nothing.
 
 ## Authorization
 

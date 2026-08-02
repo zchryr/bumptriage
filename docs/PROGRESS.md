@@ -4,7 +4,14 @@ Status of the project against what has actually been proven, rather than what
 has been written. **Update this file in the same commit as the change it
 describes** — see the SOP in `CLAUDE.md`.
 
-Last updated: 2026-08-01 · Target: v0.1.0 · Not yet released
+Last updated: 2026-08-02 · Target: v0.1.0 · Not yet released
+
+Every model provider bumptriage ships is now proven against a live endpoint
+through the full `action.mjs` path, so the remaining risk is no longer in the
+provider layer. The component table and Open questions below remain the
+authoritative list — it still includes Gitea, the release workflow, OIDC role
+assumption, comment upsert beyond one page, the two 🟡 rows for evidence
+truncation and verdict parsing, and the ❌ CloudFormation row.
 
 ## Honest summary
 
@@ -113,9 +120,9 @@ request this tool sees. It does not overturn the Sonnet-class floor and should
 not be quoted as if it did. What it does show is that the floor is about
 capability, not about vendor or model family.
 
-Still unproven: Gitea, Fireworks, Bedrock, the release and attestation workflow,
-and comment upsert across more than one page of comments. Treat those rows, not
-the project as a whole, as the remaining risk.
+Still unproven: Gitea, the release and attestation workflow, and comment upsert
+across more than one page of comments. Treat those rows, not the project as a
+whole, as the remaining risk.
 
 **Fireworks is now proven, and the way it was proven is the point.** On
 2026-08-01 the provider was first "fixed" from vendor documentation: the
@@ -139,6 +146,122 @@ because the parser is lax. `scripts/fireworks-smoke.mjs` keeps that control
 alongside the assertions, so if the behaviour reverts the probe says so instead
 of quietly passing.
 
+**Bedrock is proven, on both credential modes, and four of its documented facts
+were wrong.** On 2026-08-01 the provider ran a complete review of #2 through
+`action.mjs` twice in `us-west-2` on `us.anthropic.claude-sonnet-5` — once with
+SigV4 credentials, once with only a long-term API key and no AWS credentials in
+the environment. Both reviews were checked claim by claim against the tree and
+both were accurate: `Dockerfile:10` and `:32`, the `851f91d…`/`625d9431…`
+digests, `61/61` read out of the transcript, `buildDockerRunArgs` at
+`sandbox.mjs:46`, and no `docker build`/`compose` anywhere in `src/`. Both
+reported the validation image as `node:24-bookworm-slim` — the field Haiku 4.5
+fabricated on #1 — and both caught the stale `docker-29-cli` branch name on a
+27→28 diff. Both ran the prompt-injection check and reported the negative.
+
+What the probe established that documentation had wrong:
+
+- **`bedrock:CallWithBearerToken` is required, and is a separate action from
+  `bedrock:InvokeModel`.** The first API-key run failed 403 on every row with a
+  policy that granted invocation. This defect was in `iam/bedrock-api-key-user.yaml`
+  as first written; the probe caught it before it shipped.
+- **The key is returned as `ServiceCredentialSecret`, not `ServiceApiKeyValue`**
+  as the Amazon Bedrock user guide states. Querying the documented field returns
+  null, which looks exactly like a permissions failure.
+- **AWS CLI v2.25 creates the credential and returns no key value**, leaving an
+  unretrievable credential that must be deleted by id. v2.36 works. Two orphaned
+  credentials were created and deleted proving this.
+- **Sonnet 5 is not Mantle-only**, contrary to the Claude Code Bedrock page. It
+  is served on `bedrock-runtime`, which is what made the existing provider arm
+  correct as designed.
+
+Facts established that are now load-bearing in the docs: an inference profile is
+mandatory (`us.` prefix; the bare id is refused with *"on-demand throughput
+isn’t supported"*, with a U+2019 apostrophe — `bedrock-smoke.mjs` matches on it),
+prompt caching genuinely engages (10,404 tokens written then
+10,404 read), and `flex` is per-model — Sonnet 5 rejects it, so the roughly
+half-price tier cannot be assumed.
+
+The probe's negative controls assert *why* a call was refused, not merely that
+it was. This is not cosmetic: on its first run against a malformed key, nine
+rows went green while every one of them had failed on authentication rather than
+on the thing it was testing. A control that matches any failure is not a control.
+
+That diagnostic reports only the credential's *shape* — its length, and whether
+it is quoted, whitespace-bearing, or outside base64url. It formerly also echoed
+the first four characters of a key whose prefix it did not recognise, which
+CodeQL flagged as clear-text logging of a secret; that slice is gone. The
+suggested remedy, deleting the shape report entirely, was not taken: it would
+have removed the very thing that turned an inadmissible run into an obvious one.
+
+Mantle was probed and rejected as a path: the endpoint is live and authenticates
+the same credential, but needs both a separate IAM action
+(`bedrock-mantle:CreateInference`) and a separate model grant. Had it been
+reachable it would have run through the existing `anthropic` arm on nothing but
+a base URL, which is why it was worth checking.
+
+Not covered — three things ship in this state, and this list is the one place
+they are collected:
+
+- **OIDC role assumption end to end.** SigV4 credentials are proven, and an
+  assumed role produces exactly those environment variables, but the assumption
+  step itself is still untested and the shipped OIDC template remains unusable
+  for the separate `workflow_ref` reason below.
+- **`bedrock:GetInferenceProfile` is granted on second-hand rationale.** The
+  API-key template grants it because Anthropic's Bedrock page says an
+  application-inference-profile ARN needs it to resolve to the backing model.
+  No call here has confirmed that, and confirming it needs an application
+  inference profile, which none of the live runs used. The grant is marked
+  `NOT VERIFIED HERE` in `iam/bedrock-api-key-user.yaml` with its source and
+  date; it is recorded here so the claim is not buried in a YAML comment.
+- **No Bedrock run has ever executed in GitHub Actions.** Both credential modes
+  drove a complete review through `action.mjs`, which is what earns the ✅ — but
+  every one of those runs was local. The `anthropic` and `fireworks` providers
+  have run on a runner; `bedrock` has not. What that leaves unproven is the
+  container boundary rather than the provider: whether the credential and the
+  region reach the action's container the way they do locally. `AWS_REGION` is
+  the sharp edge, because the API-key path is the one Bedrock path with no
+  `configure-aws-credentials` step to set it — the documented form is a
+  step-level `env:`, and no run here has put a step-level `env:` on a container
+  action. The runner log for run 30584609805 shows the invocation is built from
+  the step's own environment (`-e "INPUT_*"` and `-e "BUMPTRIAGE_*"` appear
+  beside the job-level variables, with no `=value`, so Docker inherits each from
+  the runner process), which makes it very likely correct — but likely is not
+  observed. If it is wrong it fails loudly: `provider.mjs:152` throws
+  `AWS_REGION is required for the bedrock provider`.
+- **The least-privilege path is untested.** Every live run used the `"*"`
+  default for `BedrockModelArns`. Narrowing it correctly needs both the
+  inference-profile ARN and the underlying foundation-model ARNs, and a
+  deployment that has only ever run with the default has not exercised its own
+  narrowing. All three templates say so; a narrowed policy has never been
+  invoked.
+
+A review pass on 2026-08-02, before merge, found six defects in the above — all
+in the documentation and the probe, none in `provider.mjs`. Two mattered. The
+README's headline API-key example omitted `AWS_REGION`, which that path alone has
+to set because it runs no `configure-aws-credentials` step, so the example failed
+before making a call; the region is now in the snippet, in
+`examples/providers.md`, and as a commented alternative in all three Bedrock
+example workflows, which had no API-key example at all. And
+`bedrock-smoke.mjs` mangled an inference-profile ARN passed as `argv[2]` into
+`us.arn:aws:bedrock:…` — an input its own comments discuss and the docs tell
+people to pass — turning half the run red against a model that does not exist.
+The derivation now handles all three model shapes and skips the bare-id control,
+loudly, when an application-profile ARN makes one impossible to construct
+honestly.
+
+That fix is **not re-proven against a live endpoint**: the derivation was
+exercised over all five input shapes locally, but no probe run has been made with
+an ARN argument since. The Bedrock ✅ above rests on the 2026-08-01 runs, which
+used a prefixed model id.
+
+The same pass tightened the OIDC trust policy's `sub` condition, which was
+`repo:${GitHubOwner}*/${GitHubRepository}*:*` — a wildcard directly after each
+name, so `repo:owner-evil/repo-fork:…` matched it. Pre-existing, and inert only
+because the `workflow_ref` condition beside it stops the policy matching at all;
+it would have become load-bearing the moment that was fixed. It is now two ORed
+values anchoring each wildcard after an `@`. Still unassumable, still untested —
+see the row below.
+
 ## Evidence levels
 
 | Level | Meaning |
@@ -159,7 +282,7 @@ of quietly passing.
 | Sandbox execution | ✅ verified | Ran against a real repository and daemon; see Isolation below |
 | Provider — anthropic | ✅ verified | Live call to `api.anthropic.com` with `claude-haiku-4-5-20251001`, run 30584609805 |
 | Provider — fireworks | ✅ verified | Live on 2026-08-01: seven `/v1/messages` probes across three models, then a **complete review of PR #2 through `action.mjs`** on `kimi-k3` — real forge calls, live authorization gate, real diff, the genuine validation artifact. Re-checkable with `scripts/fireworks-smoke.mjs` |
-| Provider — bedrock | ⚪ untested | Env shape asserted; no live Bedrock call |
+| Provider — bedrock | ✅ verified | Live on 2026-08-01 in `us-west-2` on `us.anthropic.claude-sonnet-5`, **both** credential modes: SigV4 and a long-term API key. Each drove a **complete review of PR #2 through `action.mjs`** — real forge calls, live authorization gate, real diff, the genuine validation artifact. Re-checkable with `scripts/bedrock-smoke.mjs`. **Every Bedrock run so far has been local** — see Not covered |
 | Forge — GitHub | ✅ verified | Read PR #3 and posted a comment, run 30584609805 |
 | Forge — Gitea | ⚪ untested | No live API call at all |
 | Comment upsert | ✅ verified | Create path on #3/#4/#5; **update** path on #1 — comment id 5137399011 edited in place on a second review rather than duplicated. >1 page of comments still unproven |
@@ -212,6 +335,7 @@ Things that could still invalidate a design decision.
 | Does `runs.env` work on Gitea's act_runner? | Gitea users get missing-variable errors, which fail loudly | Run on a Gitea instance |
 | Do small local models hold tool-call format? | Endpoints fronted by a proxy may be unusable in practice | v0.2 compatibility probe. Not a concern for a hosted Fireworks model: `kimi-k3` held format through a complete review of #2 without a malformed call |
 | Can a `workflow_run`-triggered caller invoke a reusable workflow and still get `job_workflow_ref` in its token? | The org-wide IAM design in [OIDC.md](OIDC.md) depends on it | Canary workflow before rewriting the template |
+| Does a step-level `env:` reach a Docker container action? | The documented Bedrock API-key example never gets its region and fails before making a call. Loudly — `provider.mjs:152` names the missing variable | One run of the action on a runner with `env: AWS_REGION` on the step. The invocation logged for run 30584609805 is built from the step's own environment, which makes it likely; no run has set a step-level `env:` to confirm it |
 
 **Resolved 2026-08-01.** *Does Fireworks tolerate the `cache_control` the runtime
 sends?* **Yes — it accepts it and actually caches.** Probed on three models
@@ -259,7 +383,7 @@ validation containers; validation containers themselves still never receive it.
 - [x] Authorization gate, bot profiles, forge adapters
 - [x] Sandboxed validation in a sibling container
 - [x] Secrets out of argv, allowlisted model environment
-- [x] Anthropic, Fireworks, and Bedrock providers
+- [x] Anthropic, Fireworks, and Bedrock providers, all three proven live
 - [x] Two-workflow topology and example workflows
 - [x] CloudFormation for Bedrock OIDC and static keys
 - [x] Unit tests, CodeQL, Dependabot
