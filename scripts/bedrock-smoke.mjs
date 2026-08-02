@@ -186,7 +186,11 @@ function describeCredential() {
   const shape = [];
   if (token.startsWith("ABSK")) shape.push("ABSK… (long-term)");
   else if (token.startsWith("bedrock-api-key-")) shape.push("bedrock-api-key-… (short-term)");
-  else shape.push(`unrecognised prefix ${JSON.stringify(token.slice(0, 4))}`);
+  // Deliberately does not echo the prefix it did not recognise. Four characters
+  // of a credential are four characters more than this needs: the length and
+  // the flags below already separate "wrong key" from "wrong request", which is
+  // all this line is for.
+  else shape.push("prefix matches neither ABSK… nor bedrock-api-key-…");
 
   if (/^["']|["']$/.test(token)) shape.push("WRAPPED IN QUOTES — strip them");
   if (/\s/.test(token)) shape.push("CONTAINS WHITESPACE — probably truncated or re-wrapped");

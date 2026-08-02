@@ -186,6 +186,13 @@ it was. This is not cosmetic: on its first run against a malformed key, nine
 rows went green while every one of them had failed on authentication rather than
 on the thing it was testing. A control that matches any failure is not a control.
 
+That diagnostic reports only the credential's *shape* — its length, and whether
+it is quoted, whitespace-bearing, or outside base64url. It formerly also echoed
+the first four characters of a key whose prefix it did not recognise, which
+CodeQL flagged as clear-text logging of a secret; that slice is gone. The
+suggested remedy, deleting the shape report entirely, was not taken: it would
+have removed the very thing that turned an inadmissible run into an obvious one.
+
 Mantle was probed and rejected as a path: the endpoint is live and authenticates
 the same credential, but needs both a separate IAM action
 (`bedrock-mantle:CreateInference`) and a separate model grant. Had it been
